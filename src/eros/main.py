@@ -47,8 +47,10 @@ async def main() -> None:
     parser.add_argument("--sync", action="store_true", help="Sincronizar perfil desde el portafolio en vivo")
     parser.add_argument("--scan", action="store_true", help="Escanear ofertas de todas las fuentes")
     parser.add_argument("--evaluate", action="store_true", help="Evaluar ofertas pendientes con el LLM")
-    parser.add_argument("--bot", action="store_true", help="Iniciar solo el bot de Telegram")
-    parser.add_argument("--daemon", action="store_true", help="Modo demonio: Bot de Telegram + escáner periódico 24/7")
+    parser.add_argument("--server", action="store_true", help="Iniciar servidor API HTTP con FastAPI")
+    parser.add_argument("--port", type=int, default=8000, help="Puerto para el servidor HTTP (default: 8000)")
+    parser.add_argument("--bot", action="store_true", help="Iniciar bot de Telegram")
+    parser.add_argument("--daemon", action="store_true", help="Modo demonio: Servidor HTTP + escáner periódico")
 
     args = parser.parse_args()
     engine = HunterEngine()
@@ -92,20 +94,12 @@ async def main() -> None:
         await bot.start_polling()
         return
 
-    # 5. Modo por defecto o --daemon (para Coolify / VPS)
-    print("🚀 Iniciando Eros Agent en modo Daemon...")
-    if bot.is_configured:
-        print(f"• Telegram Bot: ACTIVO (Monitoreando para usuario {bot.allowed_user_id or 'todos'})")
-        # Correr el bot y el scheduler concurrentemente
-        await asyncio.gather(
-            bot.start_polling(),
-            periodic_scanner(engine, bot, interval_hours=4)
-        )
-    else:
-        print("• Telegram Bot: DESACTIVADO (configurar TELEGRAM_BOT_TOKEN en .env).")
-        print("• Ejecutando escaneo inicial y manteniendo el demonio de fondo...")
-        await engine.run_scan()
-        await periodic_scanner(engine, bot, interval_hours=4)
+    # 5. Servidor FastAPI (para el panel admin de Express)
+    import uvicorn
+    print(f"🚀 Iniciando Eros Agent API Server en http://0.0.0.0:{args.port}...")
+    config = uvicorn.Config("eros.api:app", host="0.0.0.0", port=args.port, log_level="info")
+    server = uvicorn.Server(config)
+    await server.serve()
 
 
 if __name__ == "__main__":

@@ -23,5 +23,8 @@ COPY src/ /app/src/
 # Crear directorio de datos para SQLite local o caché
 RUN mkdir -p /app/data
 
-# Comando de arranque por defecto: modo daemon 24/7
-CMD ["python", "-m", "eros.main", "--daemon"]
+# Puerto expuesto para comunicación interna con el admin panel
+EXPOSE 8000
+
+# Comando de arranque por defecto: servidor FastAPI
+CMD ["uvicorn", "eros.api:app", "--host", "0.0.0.0", "--port", "8000"]
