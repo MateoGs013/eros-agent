@@ -1,6 +1,6 @@
 # Eros Agent — Autonomous Job Hunter & CV Matcher
 
-Agente personal autónomo en segundo plano diseñado para monitorear vacantes de empleo (remoto USD / LATAM), evaluar compatibilidad técnica en tiempo real contra el portafolio y CV de Mateo, y alertar mediante un bot privado de Telegram con generación de pitches a medida.
+Agente personal autónomo diseñado para monitorear vacantes de empleo (remoto USD / LATAM), evaluar compatibilidad técnica en tiempo real contra el portafolio y CV de Mateo usando Google Gemini, y gestionar postulaciones directamente desde el **Panel Admin del Portafolio** (`https://api.mateogs.tech/admin`).
 
 ---
 
@@ -11,17 +11,38 @@ Agente personal autónomo en segundo plano diseñado para monitorear vacantes de
   - **Get on Board API:** Puestos tech para LATAM y remoto.
   - **RemoteOK API:** Puestos remotos globales en USD.
   - **Hacker News ("Who is hiring?"):** Puestos directos en startups y fundadores de EE.UU.
-- 🧠 **Evaluación Semántica con IA (LLM Matcher):**
+- 🧠 **Evaluación Semántica con IA (Gemini Flash Lite):**
   - Scoring de compatibilidad (0–100%).
   - Filtro duro de exclusión (requisitos incompatibles, on-site estricto en el exterior).
   - Puntos a favor, puntos en contra y proyectos clave de tu portafolio a destacar.
-- ✉️ **Generador de Pitches Personalizados:** Redacta cover letters y mensajes directos en español o inglés conectando los requisitos de la vacante con tus proyectos reales.
-- 📱 **Control Total por Telegram (C2):** Alertas con botones interactivos (`[✉️ Generar Pitch]`, `[🔗 Ver Oferta]`, `[❌ Descartar]`).
-- 🐳 **Listo para VPS y Coolify:** Contenedor Docker autónomo que corre 24/7 en segundo plano.
+- ✉️ **Generador de Pitches Personalizados:** Redacta cover letters y mensajes directos en español o inglés conectando los requisitos de la vacante con tus proyectos reales y el enlace a https://mateogs.tech.
+- 💻 **Centro de Mando Integrado en el Panel Admin:**
+  - Pestaña `job hunter` en la consola técnica de administración (`/admin`).
+  - Filtros rápidos por vacantes de alto match (🔥 ≥ 70%), postuladas y descartadas.
+  - Botón de escaneo en vivo (`[⚡ Escanear Ofertas]`).
+  - Redacción instantánea de pitches con IA (`[⚡ Generar Pitch con IA]`).
+  - Botón directo para copiar la propuesta adaptada al portapapeles.
+  - Estado de postulación (`[✓ Marcar Postulado]` y `[Descartar]`).
+- 🐳 **Listo para VPS y Coolify:** Contenedor Docker multi-stage con FastAPI y SQLite que se conecta transparentemente con la API de Express del portafolio.
 
 ---
 
-## Configuración Rápida (.env)
+## Arquitectura de Red
+
+```
+[ Navegador Admin: /admin ]
+         │ (Token Bearer)
+         ▼
+[ Express API :3001 ] ──proxy──▶ [ Eros Agent (FastAPI) :8000 ]
+                                         │
+                   ┌─────────────────────┼─────────────────────┐
+                   ▼                     ▼                     ▼
+             [ SQLite DB ]      [ Gemini 2.5 Flash Lite ]  [ Scrapers: GoB/RemoteOK/HN ]
+```
+
+---
+
+## Configuración (.env)
 
 Copia `.env.example` a `.env` y configura tus variables:
 
@@ -32,11 +53,10 @@ cp .env.example .env
 | Variable | Descripción |
 |---|---|
 | `PORTFOLIO_API_URL` | URL de tu API Express (`https://api.mateogs.tech/api`). |
-| `TELEGRAM_BOT_TOKEN` | Token de tu bot creado con `@BotFather`. |
-| `TELEGRAM_ALLOWED_USER_ID` | Tu ID de Telegram (para que el bot solo responda a vos). |
-| `GEMINI_API_KEY` | API Key de Google Gemini (para scoring rápido y gratuito). |
-| `ANTHROPIC_API_KEY` | API Key de Anthropic (opcional, para redacción con Claude). |
-| `MATCH_MIN_SCORE` | Puntaje mínimo (0–100) para enviar alertas (default: `75`). |
+| `GEMINI_API_KEY` | API Key de Google Gemini para scoring y redacción. |
+| `MATCH_MIN_SCORE` | Puntaje mínimo (0–100) para clasificar como alto match (default: `75`). |
+| `DATABASE_PATH` | Ruta a la base SQLite (default: `data/eros.db`). |
+| `PORT` | Puerto HTTP para la API de FastAPI (default: `8000`). |
 
 ---
 
@@ -45,20 +65,17 @@ cp .env.example .env
 Con el entorno virtual activado:
 
 ```powershell
-# 1. Probar sincronización con la API viva del portafolio
+# 1. Ejecutar el servidor API de Eros Agent (FastAPI)
+uvicorn eros.api:app --port 8000 --reload
+
+# 2. Sincronizar perfil con la API viva del portafolio
 python -m eros.main --sync
 
-# 2. Escanear vacantes en todas las fuentes
+# 3. Escaneo manual por CLI
 python -m eros.main --scan
 
-# 3. Evaluar vacantes pendientes con IA
+# 4. Evaluación manual con IA
 python -m eros.main --evaluate
-
-# 4. Iniciar bot interactivo de Telegram
-python -m eros.main --bot
-
-# 5. Iniciar modo demonio 24/7 (bot + escáner periódico)
-python -m eros.main --daemon
 ```
 
 ---
@@ -70,5 +87,8 @@ python -m eros.main --daemon
    - Añadí una nueva **Application** desde GitHub.
    - Seleccioná el repositorio `eros-agent`.
    - Tipo de Build: **Dockerfile**.
-   - Cargá las variables de entorno (`TELEGRAM_BOT_TOKEN`, `GEMINI_API_KEY`, etc.).
-3. ¡Listo! El agente comenzará a correr 24/7 en tu servidor.
+   - Cargá las variables de entorno (`PORTFOLIO_API_URL`, `GEMINI_API_KEY`, etc.).
+   - Puerto de exposición interna o red Docker: `8000`.
+3. En la configuración de tu contenedor de portafolio Express en Coolify:
+   - Variable `HUNTER_API_URL`: `http://eros-agent:8000` (usando la red interna de Docker en Coolify).
+4. ¡Listo! Todo queda interconectado en tu VPS privado.
