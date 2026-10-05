@@ -1,0 +1,20 @@
+[project]
+name = "eros-agent"
+version = "0.1.0"
+description = "Eros Agent — Agente personal autónomo para búsqueda de empleo, matching de CV y presencia técnica."
+authors = [{ name = "Mateo Gabriel Sonzogni", email = "mateogabus@gmail.com" }]
+requires-python = ">=3.12"
+dependencies = [
+    "httpx>=0.28.0",
+    "pydantic>=2.10.0",
+    "pydantic-settings>=2.7.0",
+    "beautifulsoup4>=4.13.0",
+    "aiosqlite>=0.21.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/eros"]
