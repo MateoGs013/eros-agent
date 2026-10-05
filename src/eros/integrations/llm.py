@@ -21,13 +21,15 @@ class LLMClient:
                 logger.error(f"Error llamando a Claude API: {e}. Intentando fallback con Gemini...")
 
         if self.settings.gemini_api_key:
-            return await self._call_gemini(prompt, system_prompt)
+            try:
+                return await self._call_gemini(prompt, system_prompt)
+            except Exception as e:
+                logger.error(f"Falla en Gemini ({e}). Usando evaluador heurístico.")
 
-        # Si aún no tiene API keys configuradas, usamos un análisis heurístico inteligente como fallback
-        logger.warning("No hay GEMINI_API_KEY ni ANTHROPIC_API_KEY configuradas. Ejecutando evaluador heurístico.")
+        # Si aún no tiene API keys configuradas o falló la API, usamos un análisis heurístico inteligente como fallback
         return self._heuristic_fallback(prompt)
 
-    async def _call_gemini(self, prompt: str, system_prompt: str | None = None, model: str = "gemini-2.0-flash") -> str:
+    async def _call_gemini(self, prompt: str, system_prompt: str | None = None, model: str = "gemini-flash-latest") -> str:
         """Llama a la API de Google Gemini vía REST."""
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={self.settings.gemini_api_key}"
         
@@ -58,6 +60,7 @@ class LLMClient:
         async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.post(url, json=payload)
             if resp.status_code != 200:
+                logger.error(f"Gemini API returned status {resp.status_code}: {resp.text}")
                 raise RuntimeError(f"Gemini API returned status {resp.status_code}: {resp.text}")
             
             data = resp.json()
