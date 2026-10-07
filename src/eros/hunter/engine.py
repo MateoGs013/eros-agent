@@ -8,6 +8,7 @@ from eros.hunter.pitch import PitchGenerator
 from eros.hunter.sources.base import BaseJobSource
 from eros.hunter.sources.getonboard import GetOnBoardSource
 from eros.hunter.sources.hackernews import HackerNewsHiringSource
+from eros.hunter.sources.linkedin import LinkedInJobsSource
 from eros.hunter.sources.remoteok import RemoteOKSource
 from eros.integrations.portfolio import PortfolioClient
 from eros.models import JobOffer, JobStatus, MatchResult, PitchDraft, ProfileContext
@@ -28,6 +29,7 @@ class HunterEngine:
             GetOnBoardSource(),
             RemoteOKSource(),
             HackerNewsHiringSource(),
+            LinkedInJobsSource(),
         ]
 
     async def initialize(self) -> None:
