@@ -33,6 +33,38 @@ class JobOffer(BaseModel):
     match_score: int | None = None
     match_analysis: str | None = None
     pitch_draft: str | None = None
+    tailored_cv: str | None = None
+
+
+class CVProject(BaseModel):
+    title: str
+    role: str
+    period: str
+    location: str = "Remote"
+    bullets: list[str] = Field(default_factory=list)
+    tech_stack: list[str] = Field(default_factory=list)
+
+
+class CVEducation(BaseModel):
+    institution: str
+    degree: str
+    period: str
+    details: str = ""
+
+
+class TailoredCV(BaseModel):
+    name: str = "MATEO GABRIEL SONZOGNI"
+    title: str
+    location: str = "Río Negro, Patagonia Argentina (UTC-3)"
+    email: str = "mateogabus@gmail.com"
+    github: str = "https://github.com/MateoGs013"
+    linkedin: str = "https://www.linkedin.com/in/mateo-sonzogni"
+    portfolio: str = "https://mateogs.tech"
+    summary: str
+    skills: dict[str, list[str]] = Field(default_factory=dict)
+    experience: list[CVProject] = Field(default_factory=list)
+    education: list[CVEducation] = Field(default_factory=list)
+    language: str = "en"
 
 
 class MatchResult(BaseModel):

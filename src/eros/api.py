@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 import logging
 from typing import Any
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -124,6 +125,25 @@ async def generate_pitch(job_id: str):
     return {"data": pitch}
 
 
+@app.post("/api/cv/{job_id}")
+async def generate_cv(job_id: str):
+    """Genera un CV adaptado Harvard ATS para la vacante."""
+    result = await engine.generate_cv_for_job(job_id)
+    if not result:
+        raise HTTPException(status_code=404, detail="No se pudo generar el CV para la oferta")
+    cv_data, html = result
+    return {"data": cv_data, "html": html}
+
+
+@app.get("/api/cv/{job_id}/html", response_class=HTMLResponse)
+async def get_cv_html(job_id: str):
+    """Devuelve la vista HTML imprimible del CV de la vacante."""
+    html = await engine.get_cv_html_for_job(job_id)
+    if not html:
+        raise HTTPException(status_code=404, detail="CV no disponible para esta oferta")
+    return HTMLResponse(content=html, media_type="text/html")
+
+
 @app.patch("/api/jobs/{job_id}/status")
 async def update_job_status(job_id: str, body: StatusUpdateRequest):
     """Actualiza el estado de la vacante (APPLIED, DISCARDED, SAVED, etc.)."""
@@ -140,3 +160,4 @@ async def sync_profile():
     """Fuerza la sincronización del perfil desde la API del portafolio."""
     profile = await engine.sync_profile()
     return {"ok": True, "profile": profile}
+

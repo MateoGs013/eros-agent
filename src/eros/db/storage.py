@@ -35,9 +35,16 @@ class JobStorage:
                     status TEXT NOT NULL,
                     match_score INTEGER,
                     match_analysis TEXT,
-                    pitch_draft TEXT
+                    pitch_draft TEXT,
+                    tailored_cv TEXT
                 )
             """)
+
+            # Migración idempotente para bases de datos existentes
+            try:
+                await db.execute("ALTER TABLE jobs ADD COLUMN tailored_cv TEXT")
+            except Exception:
+                pass
 
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS profile_cache (
@@ -64,20 +71,21 @@ class JobStorage:
                     INSERT INTO jobs (
                         id, source, external_id, title, company, url, description,
                         tags, salary, country, is_remote, published_at, found_at,
-                        status, match_score, match_analysis, pitch_draft
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        status, match_score, match_analysis, pitch_draft, tailored_cv
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     job.id, job.source, job.external_id, job.title, job.company, job.url,
                     job.description, tags_json, job.salary, job.country,
                     1 if job.is_remote else 0, job.published_at, job.found_at,
-                    job.status.value, job.match_score, job.match_analysis, job.pitch_draft
+                    job.status.value, job.match_score, job.match_analysis, job.pitch_draft,
+                    job.tailored_cv
                 ))
             else:
                 await db.execute("""
                     UPDATE jobs SET
-                        status = ?, match_score = ?, match_analysis = ?, pitch_draft = ?
+                        status = ?, match_score = ?, match_analysis = ?, pitch_draft = ?, tailored_cv = ?
                     WHERE id = ?
-                """, (job.status.value, job.match_score, job.match_analysis, job.pitch_draft, job.id))
+                """, (job.status.value, job.match_score, job.match_analysis, job.pitch_draft, job.tailored_cv, job.id))
 
             await db.commit()
             return not exists
@@ -161,5 +169,6 @@ class JobStorage:
             status=JobStatus(row["status"]),
             match_score=row["match_score"],
             match_analysis=row["match_analysis"],
-            pitch_draft=row["pitch_draft"]
+            pitch_draft=row["pitch_draft"],
+            tailored_cv=row["tailored_cv"] if "tailored_cv" in row.keys() else None
         )

@@ -3,6 +3,7 @@ import json
 import logging
 from eros.config import get_settings
 from eros.db.storage import JobStorage
+from eros.hunter.cv_generator import CVGenerator
 from eros.hunter.matcher import JobMatcher
 from eros.hunter.pitch import PitchGenerator
 from eros.hunter.sources.base import BaseJobSource
@@ -11,7 +12,14 @@ from eros.hunter.sources.hackernews import HackerNewsHiringSource
 from eros.hunter.sources.linkedin import LinkedInJobsSource
 from eros.hunter.sources.remoteok import RemoteOKSource
 from eros.integrations.portfolio import PortfolioClient
-from eros.models import JobOffer, JobStatus, MatchResult, PitchDraft, ProfileContext
+from eros.models import (
+    JobOffer,
+    JobStatus,
+    MatchResult,
+    PitchDraft,
+    ProfileContext,
+    TailoredCV,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +33,7 @@ class HunterEngine:
         self.portfolio_client = PortfolioClient()
         self.matcher = JobMatcher()
         self.pitch_gen = PitchGenerator()
+        self.cv_gen = CVGenerator()
         self.sources: list[BaseJobSource] = [
             GetOnBoardSource(),
             RemoteOKSource(),
@@ -118,3 +127,40 @@ class HunterEngine:
         job.pitch_draft = json.dumps(pitch.model_dump())
         await self.storage.save_job(job)
         return pitch
+
+    async def generate_cv_for_job(self, job_id: str) -> tuple[TailoredCV, str] | None:
+        """Genera un CV adaptado en formato Harvard ATS para la vacante."""
+        job = await self.storage.get_job(job_id)
+        if not job:
+            return None
+
+        profile = await self.get_active_profile()
+        match = None
+        if job.match_analysis:
+            try:
+                match = MatchResult.model_validate_json(job.match_analysis)
+            except Exception:
+                pass
+
+        tailored_cv = await self.cv_gen.generate_tailored_cv(job, profile, match)
+        html = self.cv_gen.render_harvard_html(tailored_cv)
+        job.tailored_cv = json.dumps(tailored_cv.model_dump())
+        await self.storage.save_job(job)
+        return tailored_cv, html
+
+    async def get_cv_html_for_job(self, job_id: str) -> str | None:
+        """Obtiene o renderiza el HTML imprimible del CV de una vacante."""
+        job = await self.storage.get_job(job_id)
+        if not job:
+            return None
+
+        if job.tailored_cv:
+            try:
+                cv_data = TailoredCV.model_validate_json(job.tailored_cv)
+                return self.cv_gen.render_harvard_html(cv_data)
+            except Exception:
+                pass
+
+        res = await self.generate_cv_for_job(job_id)
+        return res[1] if res else None
+
