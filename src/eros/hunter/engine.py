@@ -98,8 +98,22 @@ class HunterEngine:
         total_found = 0
         new_jobs = 0
 
-        # Correr todas las fuentes concurrentemente
-        tasks = [source.fetch_jobs() for source in self.sources]
+        # Filtrar fuentes según configuración dinámica
+        enabled_sources_json = await self.storage.get_setting("sources_enabled")
+        active_sources = self.sources
+        if enabled_sources_json:
+            try:
+                enabled_map = json.loads(enabled_sources_json)
+                active_sources = [s for s in self.sources if enabled_map.get(s.name, True)]
+            except Exception as e:
+                logger.warning(f"Error parseando sources_enabled: {e}")
+
+        # Filtro de modalidad remota
+        remote_only_val = await self.storage.get_setting("remote_only", "1")
+        remote_only = remote_only_val == "1"
+
+        # Correr las fuentes activas concurrentemente
+        tasks = [source.fetch_jobs() for source in active_sources]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
         all_offers: list[JobOffer] = []
@@ -111,6 +125,9 @@ class HunterEngine:
 
         total_found = len(all_offers)
         for job in all_offers:
+            if remote_only and not job.is_remote:
+                continue
+
             # Filtro adicional de calidad antes de persistir
             qual = check_job_qualification(
                 title=job.title,
@@ -135,6 +152,13 @@ class HunterEngine:
         unseen = await self.storage.list_unseen_jobs()
         evaluated_matches: list[tuple[JobOffer, MatchResult]] = []
 
+        # Obtener umbral dinámico de la base de datos
+        min_score_str = await self.storage.get_setting("match_min_score", str(self.settings.match_min_score))
+        try:
+            min_score = int(min_score_str) if min_score_str else self.settings.match_min_score
+        except ValueError:
+            min_score = self.settings.match_min_score
+
         batch = unseen[:limit]
         for job in batch:
             logger.info(f"Evaluando compatibilidad: {job.title} en {job.company}...")
@@ -146,7 +170,7 @@ class HunterEngine:
             # Si el modelo determinó DESCARTAR o incompatibilidad legal/geográfica
             if match.score <= 35 or match.verdict == "DESCARTAR":
                 job.status = JobStatus.DISCARDED
-            elif match.score < self.settings.match_min_score:
+            elif match.score < min_score:
                 job.status = JobStatus.EVALUATED
             else:
                 job.status = JobStatus.SAVED

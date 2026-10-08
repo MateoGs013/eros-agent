@@ -17,6 +17,9 @@ class Settings(BaseSettings):
     env: str = "development"
     log_level: str = "INFO"
 
+    # Clave de autenticación para endpoints protegidos y panel de administración
+    eros_api_key: str = ""
+
     # API de portafolio en producción (o localhost si se prueba en dev)
     portfolio_api_url: str = "https://api.mateogs.tech/api"
 

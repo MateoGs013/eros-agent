@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 import json
 import logging
 from typing import Any
@@ -50,6 +51,14 @@ class JobStorage:
                 CREATE TABLE IF NOT EXISTS profile_cache (
                     key TEXT PRIMARY KEY,
                     data TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+            """)
+
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS agent_settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 )
             """)
@@ -190,3 +199,40 @@ class JobStorage:
             pitch_draft=row["pitch_draft"],
             tailored_cv=row["tailored_cv"] if "tailored_cv" in row.keys() else None
         )
+
+    async def get_setting(self, key: str, default: str | None = None) -> str | None:
+        """Obtiene un valor de configuración persistente del agente."""
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                async with db.execute("SELECT value FROM agent_settings WHERE key = ?", (key,)) as cursor:
+                    row = await cursor.fetchone()
+                    return row[0] if row else default
+        except Exception:
+            return default
+
+    async def set_setting(self, key: str, value: str) -> None:
+        """Guarda o actualiza un valor de configuración persistente del agente."""
+        now = datetime.now(timezone.utc).isoformat()
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS agent_settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+            """)
+            await db.execute(
+                "INSERT INTO agent_settings (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = ?, updated_at = ?",
+                (key, value, now, value, now),
+            )
+            await db.commit()
+
+    async def get_all_settings(self) -> dict[str, str]:
+        """Obtiene todos los valores de configuración persistentes."""
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                async with db.execute("SELECT key, value FROM agent_settings") as cursor:
+                    rows = await cursor.fetchall()
+                    return {r[0]: r[1] for r in rows}
+        except Exception:
+            return {}
