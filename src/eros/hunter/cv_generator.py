@@ -25,14 +25,15 @@ REGLAS DE ORO:
    - "La Rúcula Gastrobar": Sitio editorial en producción para cliente en Cádiz (España), Vue 3, Vite, Tailwind CSS, GSAP, Lenis, Lighthouse 99 Performance / 100 SEO, menú QR con offline cache fallback.
    - "Eros Agent": Agente autónomo de prospección y reclutamiento con LLMs (Gemini Flash), scrapers multi-fuente asíncronos, FastAPI y SQLite.
    - "Barberpole / Soluciones de Gestión": Aplicación web de turnos y gestión de clientes con arquitectura modular, autenticación y base de datos relacional (TypeScript, Node.js, PostgreSQL, Vue 3).
-   - "Escuela Da Vinci": Analista de Sistemas / Software & Systems Analysis (2023 – 2026).
+   - "Escuela Da Vinci": Tecnicatura Superior en Diseño y Programación Web / Desarrollo Web y Mobile (2024 – 2026, En curso / Tesis Preaprobada). Formación especializada en desarrollo Full Stack (React, Next.js, Node.js, Express, APIs REST), bases de datos relacionales/vectoriales, arquitectura web y diseño UI/UX.
+   - "Centro de Educación Técnica N.º 30 (CET 30)": Técnico en Programación (2017 – 2023, Cipolletti, Río Negro). Formación técnica secundaria de 7 años en lógica algorítmica, estructuras de datos, redes, sistemas operativos y desarrollo de software.
 
 2. COBERTURA TOTAL DE LA HOJA A4 (HARVARD SINGLE-PAGE STANDARD):
    - CRUCIAL: El CV debe llenar armónicamente entre el 90% y el 95% de una página A4, sin dejar grandes espacios vacíos por debajo y sin desbordar a una segunda página.
    - Incluí EXACTAMENTE 4 proyectos/experiencias relevantes seleccionados de la lista de producción anterior, priorizando los más afines a la vacante.
    - Cada proyecto DEBE tener EXACTAMENTE 3 viñetas (bullets) sustanciales, detalladas y ricas en contexto de ingeniería y métricas formuladas con Google XYZ ("Logró [X] medido por [Y] mediante [Z]").
    - Habilidades Técnicas (Skills) agrupadas en 4 categorías completas y densas: "Backend & APIs", "Databases & Storage", "Architecture & DevOps", "Frontend & UI Ecosystem".
-   - Educación con detalle amplio sobre materias y fundamentos clave de Analista de Sistemas (Arquitectura de software, algoritmos, bases de datos, sistemas distribuidos).
+   - Educación con 2 entradas clave: Escuela Da Vinci (Diseño y Programación Web / Full Stack) y CET 30 (Técnico en Programación).
    - Sección de Idiomas (Languages): Español (Nativo) e Inglés (B2 Profesional / Técnico).
    - Sección de Metodologías & Buenas Prácticas: Clean Architecture, Principios SOLID, Git Flow & CI/CD, Docker, Metodologías Ágiles (Scrum).
 
@@ -76,9 +77,15 @@ Debes responder ÚNICAMENTE un objeto JSON válido con este formato:
   "education": [
     {
       "institution": "Escuela Da Vinci",
-      "degree": "Analista de Sistemas / Software & Systems Analysis",
-      "period": "2023 – 2026",
-      "details": "Formación integral en ingeniería de software, arquitectura de sistemas distribuidos, diseño de bases de datos relacionales/vectoriales y algoritmos avanzados."
+      "degree": "Técnico Superior en Diseño y Programación Web / Desarrollo Web y Mobile",
+      "period": "2024 – 2026",
+      "details": "Formación integral en desarrollo Full Stack (React, Next.js, Node.js, APIs REST), arquitectura web, bases de datos relacionales y diseño UI/UX. Tesis preaprobada: Ynara AI Assistant (382 commits)."
+    },
+    {
+      "institution": "Centro de Educación Técnica N.º 30 (CET 30)",
+      "degree": "Técnico en Programación",
+      "period": "2017 – 2023",
+      "details": "Formación técnica de 7 años en lógica algorítmica, estructuras de datos, redes, sistemas operativos y desarrollo de software."
     }
   ],
   "languages": [
@@ -201,18 +208,24 @@ Generá el JSON del CV adaptado siguiendo estrictamente las instrucciones del si
                 education=[
                     CVEducation(
                         institution=ed.get("institution", "Escuela Da Vinci"),
-                        degree=ed.get("degree", "Analista de Sistemas / Software & Systems Analysis"),
-                        period=ed.get("period", "2023 – 2026"),
-                        details=ed.get("details", "Formación integral en ingeniería de software, arquitectura de sistemas distribuidos, bases de datos y algoritmos."),
+                        degree=ed.get("degree", "Técnico Superior en Diseño y Programación Web"),
+                        period=ed.get("period", "2024 – 2026"),
+                        details=ed.get("details", "Formación intensiva en desarrollo Full Stack (React, Next.js, Node.js, APIs REST), bases de datos relacionales y diseño UI/UX."),
                     )
                     for ed in data.get("education", [])
                 ] or [
                     CVEducation(
                         institution="Escuela Da Vinci",
-                        degree="Analista de Sistemas / Software & Systems Analysis",
-                        period="2023 – 2026",
-                        details="Formación integral en ingeniería de software, arquitectura de sistemas distribuidos, bases de datos y algoritmos.",
-                    )
+                        degree="Técnico Superior en Diseño y Programación Web / Desarrollo Web y Mobile",
+                        period="2024 – 2026",
+                        details="Formación intensiva en desarrollo Full Stack (React, Next.js, Node.js, APIs REST), bases de datos relacionales y diseño UI/UX. Tesis preaprobada: Ynara AI Assistant (382 commits).",
+                    ),
+                    CVEducation(
+                        institution="Centro de Educación Técnica N.º 30 (CET 30)",
+                        degree="Técnico en Programación",
+                        period="2017 – 2023",
+                        details="Formación técnica de 7 años en lógica algorítmica, estructuras de datos, redes, sistemas operativos y desarrollo de software.",
+                    ),
                 ],
                 languages=languages_val,
                 methodologies=methodologies_val,
@@ -291,6 +304,20 @@ Generá el JSON del CV adaptado siguiendo estrictamente las instrucciones del si
                     tech_stack=["Vue 3", "Vite", "Tailwind CSS", "GSAP", "Lenis", "PWA"],
                 ),
             ]
+            edu = [
+                CVEducation(
+                    institution="Escuela Da Vinci",
+                    degree="Higher Technician in Web Design & Software Development",
+                    period="2024 – 2026",
+                    details="Comprehensive Full Stack web & mobile engineering (React, Next.js, Node.js, REST APIs, databases, UI/UX). Pre-approved degree thesis: Ynara AI Assistant (382 commits).",
+                ),
+                CVEducation(
+                    institution="Centro de Educación Técnica N.º 30 (CET 30)",
+                    degree="Computer Programming Technician (7-Year Technical Program)",
+                    period="2017 – 2023",
+                    details="7-year comprehensive technical program in algorithmic logic, data structures, networking, operating systems, and software development.",
+                ),
+            ]
         else:
             title = "Desarrollador Full Stack & Backend Engineer"
             summary = (
@@ -359,6 +386,20 @@ Generá el JSON del CV adaptado siguiendo estrictamente las instrucciones del si
                     tech_stack=["Vue 3", "Vite", "Tailwind CSS", "GSAP", "Lenis", "PWA"],
                 ),
             ]
+            edu = [
+                CVEducation(
+                    institution="Escuela Da Vinci",
+                    degree="Técnico Superior en Diseño y Programación Web / Desarrollo Web y Mobile",
+                    period="2024 – 2026",
+                    details="Formación intensiva en desarrollo Full Stack (React, Next.js, Node.js, APIs REST), bases de datos relacionales y UX/UI. Tesis de grado preaprobada: Ynara AI Assistant (382 commits).",
+                ),
+                CVEducation(
+                    institution="Centro de Educación Técnica N.º 30 (CET 30)",
+                    degree="Técnico en Programación",
+                    period="2017 – 2023",
+                    details="Formación técnica de 7 años en lógica algorítmica, estructuras de datos, redes, sistemas operativos y desarrollo de software.",
+                ),
+            ]
 
         return TailoredCV(
             name="MATEO GABRIEL SONZOGNI",
@@ -376,14 +417,7 @@ Generá el JSON del CV adaptado siguiendo estrictamente las instrucciones del si
                 "Frontend & UI Ecosystem": ["React", "Next.js", "Vue 3", "Nuxt 4", "Tailwind CSS", "TypeScript"],
             },
             experience=exp,
-            education=[
-                CVEducation(
-                    institution="Escuela Da Vinci",
-                    degree="Analista de Sistemas / Software & Systems Analysis",
-                    period="2023 – 2026",
-                    details="Formación integral en ingeniería de software, arquitectura de sistemas distribuidos, bases de datos relacionales y algoritmos avanzados.",
-                )
-            ],
+            education=edu,
             languages=languages,
             methodologies=methodologies,
             language="en" if is_en else "es",

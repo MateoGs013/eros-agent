@@ -104,6 +104,7 @@ class ProfileContext(BaseModel):
     location: str = "Río Negro, Patagonia Argentina"
     timezone: str = "UTC-3"
     languages: str = "Español (Nativo) · Inglés (B2 Profesional Técnico)"
+    education: str = "Técnico Superior en Diseño y Programación Web (Escuela Da Vinci, 2024–2026) · Técnico en Programación (CET 30, 2017–2023)"
     core_competencies: str = ""
     engineering_philosophy: str = ""
     projects: list[ProjectSummary] = Field(default_factory=list)
