@@ -64,6 +64,8 @@ class TailoredCV(BaseModel):
     skills: dict[str, list[str]] = Field(default_factory=dict)
     experience: list[CVProject] = Field(default_factory=list)
     education: list[CVEducation] = Field(default_factory=list)
+    languages: list[str] = Field(default_factory=list)
+    methodologies: list[str] = Field(default_factory=list)
     language: str = "en"
 
 
