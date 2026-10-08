@@ -1,6 +1,7 @@
 import logging
 import httpx
 from bs4 import BeautifulSoup
+from eros.hunter.filters import check_job_qualification
 from eros.hunter.sources.base import BaseJobSource
 from eros.models import JobOffer
 
@@ -31,35 +32,31 @@ class RemoteOKSource(BaseJobSource):
                     return []
 
                 items = resp.json()
-                # El primer elemento suele ser legal notice
                 if items and isinstance(items, list) and not isinstance(items[0], dict):
                     items = items[1:]
 
                 for item in items:
-                    if not isinstance(item, dict):
-                        continue
-
-                    # Ignorar banner o elementos no vacante
-                    if "position" not in item:
+                    if not isinstance(item, dict) or "position" not in item:
                         continue
 
                     job_id_ext = str(item.get("id"))
                     title = item.get("position", "")
                     tags = item.get("tags", [])
-
-                    # Filtrar por foco de frontend / fullstack / web / javascript / typescript
-                    tags_lower = [t.lower() for t in tags]
-                    title_lower = title.lower()
-
-                    relevant_keywords = ["frontend", "front-end", "fullstack", "full stack", "vue", "react", "typescript", "javascript", "web", "node"]
-                    is_relevant = any(k in title_lower for k in relevant_keywords) or any(k in tags_lower for k in relevant_keywords)
-                    
-                    if not is_relevant:
-                        continue
+                    raw_loc = item.get("location") or "Worldwide / Remoto"
 
                     # Descripción
                     desc_html = item.get("description", "")
                     clean_desc = BeautifulSoup(desc_html, "html.parser").get_text(separator="\n").strip()
+
+                    # Calificación por heurística (excluye US-only, Staff/Director, etc.)
+                    qual = check_job_qualification(
+                        title=title,
+                        description=clean_desc,
+                        country=raw_loc,
+                        tags=tags,
+                    )
+                    if not qual.qualified:
+                        continue
 
                     # Salario
                     sal_min = item.get("salary_min")
@@ -82,13 +79,13 @@ class RemoteOKSource(BaseJobSource):
                         description=clean_desc[:3000],
                         tags=tags,
                         salary=salary_str,
-                        country=item.get("location") or "Worldwide / Remoto",
+                        country=raw_loc,
                         is_remote=True,
                         published_at=item.get("date")
                     )
                     offers.append(job_offer)
 
-                    if len(offers) >= 20:  # Límite por corrida para no saturar
+                    if len(offers) >= 15:
                         break
 
             except Exception as e:

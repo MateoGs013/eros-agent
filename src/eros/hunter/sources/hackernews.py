@@ -1,6 +1,7 @@
 import logging
 import httpx
 from bs4 import BeautifulSoup
+from eros.hunter.filters import check_job_qualification
 from eros.hunter.sources.base import BaseJobSource
 from eros.models import JobOffer
 
@@ -29,7 +30,6 @@ class HackerNewsHiringSource(BaseJobSource):
                     return []
 
                 latest_story_id = stories[0].get("objectID")
-                story_title = stories[0].get("title", "Ask HN: Who is hiring?")
 
                 # 2. Obtener comentarios del post
                 comments_url = f"https://hn.algolia.com/api/v1/search?tags=comment,story_{latest_story_id}&hitsPerPage=40"
@@ -55,15 +55,21 @@ class HackerNewsHiringSource(BaseJobSource):
                     if "remote" not in header.lower() and "remote" not in text.lower():
                         continue
 
-                    # Filtrar por relevancia técnica
-                    text_lower = text.lower()
-                    if not any(k in text_lower for k in ["frontend", "front-end", "fullstack", "full stack", "vue", "react", "typescript", "javascript", "web"]):
-                        continue
-
                     # Extraer compañía y título aproximados del encabezado "Company | Role | Location | Remote"
                     parts = [p.strip() for p in header.split("|")]
                     company = parts[0] if len(parts) >= 1 else "Startup (Hacker News)"
                     role = parts[1] if len(parts) >= 2 else "Software Engineer"
+                    loc = parts[2] if len(parts) >= 3 else "Remote"
+
+                    # Pre-filtro riguroso
+                    qual = check_job_qualification(
+                        title=role,
+                        description=text,
+                        country=loc,
+                        tags=["remote", "startup", "hacker-news"],
+                    )
+                    if not qual.qualified:
+                        continue
 
                     hn_url = f"https://news.ycombinator.com/item?id={c_id}"
 
@@ -77,17 +83,17 @@ class HackerNewsHiringSource(BaseJobSource):
                         description=text[:3000],
                         tags=["remote", "startup", "hacker-news"],
                         salary=None,
-                        country="Remoto",
+                        country=loc,
                         is_remote=True,
                         published_at=comment.get("created_at")
                     )
                     offers.append(job_offer)
 
-                    if len(offers) >= 15:
+                    if len(offers) >= 10:
                         break
 
             except Exception as e:
                 logger.error(f"Error procesando Hacker News Hiring: {e}")
 
-        logger.info(f"Hacker News: {len(offers)} vacantes remotas encontradas.")
+        logger.info(f"Hacker News: {len(offers)} vacantes remotas calificadas encontradas.")
         return offers

@@ -1,6 +1,7 @@
 import logging
 import httpx
 from bs4 import BeautifulSoup
+from eros.hunter.filters import check_job_qualification
 from eros.hunter.sources.base import BaseJobSource
 from eros.models import JobOffer
 
@@ -15,7 +16,7 @@ class GetOnBoardSource(BaseJobSource):
         return "getonboard"
 
     async def fetch_jobs(self) -> list[JobOffer]:
-        url = "https://www.getonbrd.com/api/v0/categories/programming/jobs?per_page=25"
+        url = "https://www.getonbrd.com/api/v0/categories/programming/jobs?per_page=30"
         offers = []
 
         headers = {
@@ -38,17 +39,25 @@ class GetOnBoardSource(BaseJobSource):
                     job_id_ext = str(item.get("id"))
                     title = attrs.get("title", "")
                     
-                    # Filtrar posiciones puramente no técnicas o muy lejanas
-                    title_lower = title.lower()
-                    if not any(k in title_lower for k in [
-                        "developer", "desarrollador", "frontend", "front-end", "full stack",
-                        "fullstack", "vue", "react", "typescript", "node", "software", "web"
-                    ]):
-                        continue
-
                     # Limpiar descripción HTML
                     desc_html = attrs.get("description", "")
                     clean_desc = BeautifulSoup(desc_html, "html.parser").get_text(separator="\n").strip()
+
+                    # Tags / Tecnologías
+                    tags_raw = attrs.get("tags", {}).get("data", [])
+                    tags = [t.get("attributes", {}).get("name") for t in tags_raw if t.get("attributes", {}).get("name")]
+
+                    country = attrs.get("country") or "LATAM / Remoto"
+
+                    # Pre-filtro de calificación
+                    qual = check_job_qualification(
+                        title=title,
+                        description=clean_desc,
+                        country=country,
+                        tags=tags,
+                    )
+                    if not qual.qualified:
+                        continue
 
                     # Compañía
                     company_data = attrs.get("company", {}).get("data", {})
@@ -64,10 +73,6 @@ class GetOnBoardSource(BaseJobSource):
                     elif min_sal:
                         salary_str = f"{currency} {min_sal}+"
 
-                    # Tags / Tecnologías
-                    tags_raw = attrs.get("tags", {}).get("data", [])
-                    tags = [t.get("attributes", {}).get("name") for t in tags_raw if t.get("attributes", {}).get("name")]
-
                     # Enlace
                     links = item.get("links", {})
                     public_url = links.get("public_url") or f"https://www.getonbrd.com/jobs/{job_id_ext}"
@@ -79,10 +84,10 @@ class GetOnBoardSource(BaseJobSource):
                         title=title,
                         company=company_name,
                         url=public_url,
-                        description=clean_desc[:3000],  # Recorte para no sobrecargar el LLM
+                        description=clean_desc[:3000],
                         tags=tags,
                         salary=salary_str,
-                        country=attrs.get("country"),
+                        country=country,
                         is_remote=bool(attrs.get("remote", True)),
                         published_at=str(attrs.get("published_at")) if attrs.get("published_at") else None
                     )

@@ -109,15 +109,27 @@ class JobStorage:
                 return [self._row_to_job(r) for r in rows]
 
     async def list_matched_jobs(self, min_score: int = 70, limit: int = 20) -> list[JobOffer]:
-        """Devuelve las vacantes con match superior a un puntaje."""
+        """Devuelve las vacantes con match superior a un puntaje (incluye pendientes si min_score=0)."""
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
-            async with db.execute("""
-                SELECT * FROM jobs
-                WHERE match_score >= ? AND status != ?
-                ORDER BY match_score DESC, found_at DESC
-                LIMIT ?
-            """, (min_score, JobStatus.DISCARDED.value, limit)) as cursor:
+            if min_score == 0:
+                query = """
+                    SELECT * FROM jobs
+                    WHERE status != ?
+                    ORDER BY COALESCE(match_score, 0) DESC, found_at DESC
+                    LIMIT ?
+                """
+                params = (JobStatus.DISCARDED.value, limit)
+            else:
+                query = """
+                    SELECT * FROM jobs
+                    WHERE match_score >= ? AND status != ?
+                    ORDER BY match_score DESC, found_at DESC
+                    LIMIT ?
+                """
+                params = (min_score, JobStatus.DISCARDED.value, limit)
+
+            async with db.execute(query, params) as cursor:
                 rows = await cursor.fetchall()
                 return [self._row_to_job(r) for r in rows]
 
@@ -125,6 +137,12 @@ class JobStorage:
         """Actualiza el estado de una vacante (ej: aplicada, descartada)."""
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute("UPDATE jobs SET status = ? WHERE id = ?", (status.value, job_id))
+            await db.commit()
+
+    async def delete_job(self, job_id: str) -> None:
+        """Elimina físicamente una vacante de la base de datos."""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
             await db.commit()
 
     async def save_profile_cache(self, profile: ProfileContext) -> None:

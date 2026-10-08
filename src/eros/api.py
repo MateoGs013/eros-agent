@@ -91,11 +91,11 @@ async def get_job(job_id: str):
 
 @app.post("/api/scan")
 async def trigger_scan(evaluate: bool = True):
-    """Dispara un escaneo en vivo en Get on Board, RemoteOK y Hacker News."""
+    """Dispara un escaneo en vivo en todas las fuentes curadas."""
     scan_res = await engine.run_scan()
     eval_res = []
     if evaluate:
-        eval_res = await engine.evaluate_pending_jobs(limit=8)
+        eval_res = await engine.evaluate_pending_jobs(limit=15)
 
     return {
         "ok": True,
@@ -105,8 +105,15 @@ async def trigger_scan(evaluate: bool = True):
     }
 
 
+@app.post("/api/purge")
+async def trigger_purge():
+    """Limpia o marca como descartadas vacantes en base que no cumplen con los filtros actuales."""
+    purged = await engine.clean_existing_unqualified_jobs()
+    return {"ok": True, "purged_count": purged}
+
+
 @app.post("/api/evaluate")
-async def trigger_evaluate(limit: int = 10):
+async def trigger_evaluate(limit: int = 15):
     """Evalúa las vacantes pendientes con Gemini."""
     eval_res = await engine.evaluate_pending_jobs(limit=limit)
     return {

@@ -2,6 +2,7 @@ import asyncio
 import logging
 import httpx
 from bs4 import BeautifulSoup
+from eros.hunter.filters import check_job_qualification
 from eros.hunter.sources.base import BaseJobSource
 from eros.models import JobOffer
 
@@ -15,7 +16,7 @@ USER_AGENT = (
 
 
 class LinkedInJobsSource(BaseJobSource):
-    """Conector para vacantes públicas de LinkedIn usando la API de búsqueda guest (sin login ni cookies)."""
+    """Conector para vacantes públicas de LinkedIn enfocado en LATAM, Argentina y Remoto Internacional."""
 
     @property
     def name(self) -> str:
@@ -23,12 +24,14 @@ class LinkedInJobsSource(BaseJobSource):
 
     async def fetch_jobs(self) -> list[JobOffer]:
         queries = [
-            # 1. Puestos remotos globales de Frontend
-            "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords=Frontend+Developer&f_WT=2&f_TPR=r86400&start=0",
-            # 2. Puestos remotos de Full Stack en LATAM / Argentina
+            # 1. Puestos remotos de Frontend en LATAM
+            "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords=Frontend+Developer&location=Latin+America&f_WT=2&f_TPR=r604800&start=0",
+            # 2. Puestos remotos de Full Stack en Argentina / LATAM
             "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords=Full+Stack+Developer&location=Argentina&f_WT=2&f_TPR=r604800&start=0",
-            # 3. Puestos remotos de React / Vue / TypeScript
-            "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords=React+Vue+TypeScript&f_WT=2&f_TPR=r604800&start=0",
+            # 3. Puestos remotos de React / Vue / TypeScript en LATAM
+            "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords=React+Vue+TypeScript&location=Latin+America&f_WT=2&f_TPR=r604800&start=0",
+            # 4. Creative Developer & UI Engineer remoto
+            "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords=Creative+Developer+Frontend&f_WT=2&f_TPR=r2592000&start=0",
         ]
 
         headers = {
@@ -76,16 +79,6 @@ class LinkedInJobsSource(BaseJobSource):
                         if not title:
                             continue
 
-                        # Filtro básico de relevancia técnica
-                        title_lower = title.lower()
-                        if not any(k in title_lower for k in [
-                            "developer", "desarrollador", "frontend", "front-end", "full stack",
-                            "fullstack", "vue", "react", "typescript", "software", "web", "engineer", "ui"
-                        ]):
-                            continue
-
-                        seen_ids.add(job_id_ext)
-
                         # Empresa
                         company_el = card.find("h4", class_="base-search-card__subtitle")
                         company = company_el.get_text(strip=True) if company_el else "Empresa Confidencial"
@@ -117,6 +110,19 @@ class LinkedInJobsSource(BaseJobSource):
                         except Exception as e:
                             logger.debug(f"No se pudo descargar descripción extendida de LinkedIn {job_id_ext}: {e}")
 
+                        # Pre-filtro riguroso de calificación (descarta US-only, Staff/Director, Polygraph, etc.)
+                        qual = check_job_qualification(
+                            title=title,
+                            description=description,
+                            country=location,
+                            tags=["LinkedIn", "Remote"],
+                        )
+                        if not qual.qualified:
+                            logger.debug(f"LinkedIn: '{title}' descartada: {qual.reason}")
+                            continue
+
+                        seen_ids.add(job_id_ext)
+
                         # Normalizar a JobOffer
                         offer = JobOffer(
                             id=self.generate_job_id(job_id_ext),
@@ -137,5 +143,5 @@ class LinkedInJobsSource(BaseJobSource):
                 except Exception as e:
                     logger.warning(f"Error consultando vacantes en LinkedIn ({query_url}): {e}")
 
-        logger.info(f"LinkedIn Jobs: se obtuvieron {len(offers)} ofertas relevantes.")
+        logger.info(f"LinkedIn Jobs: se obtuvieron {len(offers)} ofertas calificadas para LATAM.")
         return offers

@@ -4,6 +4,7 @@ import logging
 from eros.config import get_settings
 from eros.db.storage import JobStorage
 from eros.hunter.cv_generator import CVGenerator
+from eros.hunter.filters import check_job_qualification
 from eros.hunter.matcher import JobMatcher
 from eros.hunter.pitch import PitchGenerator
 from eros.hunter.sources.base import BaseJobSource
@@ -11,6 +12,8 @@ from eros.hunter.sources.getonboard import GetOnBoardSource
 from eros.hunter.sources.hackernews import HackerNewsHiringSource
 from eros.hunter.sources.linkedin import LinkedInJobsSource
 from eros.hunter.sources.remoteok import RemoteOKSource
+from eros.hunter.sources.remotive import RemotiveSource
+from eros.hunter.sources.weworkremotely import WeWorkRemotelySource
 from eros.integrations.portfolio import PortfolioClient
 from eros.models import (
     JobOffer,
@@ -35,18 +38,42 @@ class HunterEngine:
         self.pitch_gen = PitchGenerator()
         self.cv_gen = CVGenerator()
         self.sources: list[BaseJobSource] = [
+            RemotiveSource(),
+            WeWorkRemotelySource(),
+            LinkedInJobsSource(),
             GetOnBoardSource(),
             RemoteOKSource(),
             HackerNewsHiringSource(),
-            LinkedInJobsSource(),
         ]
 
     async def initialize(self) -> None:
         """Inicializa la base de datos y sincroniza el perfil inicial si no existe."""
         await self.storage.init_db()
+        await self.clean_existing_unqualified_jobs()
         cached = await self.storage.get_profile_cache()
         if not cached:
             await self.sync_profile()
+
+    async def clean_existing_unqualified_jobs(self) -> int:
+        """Purga o marca como descartadas vacantes previas incompatibles (US-only, etc.)."""
+        purged = 0
+        try:
+            all_jobs = await self.storage.list_matched_jobs(min_score=0, limit=500)
+            for j in all_jobs:
+                qual = check_job_qualification(
+                    title=j.title,
+                    description=j.description,
+                    country=j.country,
+                    tags=j.tags,
+                )
+                if not qual.qualified or (j.match_score is not None and j.match_score <= 35):
+                    await self.storage.update_job_status(j.id, JobStatus.DISCARDED)
+                    purged += 1
+            if purged > 0:
+                logger.info(f"Limpieza de base: se marcaron {purged} vacantes obsoletas/incompatibles como DESCARTADAS.")
+        except Exception as e:
+            logger.warning(f"Error durante limpieza de vacantes obsoletas: {e}")
+        return purged
 
     async def sync_profile(self) -> ProfileContext:
         """Actualiza y guarda en caché el perfil más reciente de Mateo desde la API."""
@@ -64,7 +91,7 @@ class HunterEngine:
         return await self.sync_profile()
 
     async def run_scan(self) -> dict[str, int]:
-        """Ejecuta una búsqueda en todas las fuentes y guarda las ofertas nuevas."""
+        """Ejecuta una búsqueda en todas las fuentes curadas y guarda únicamente las ofertas calificadas."""
         await self.initialize()
         total_found = 0
         new_jobs = 0
@@ -82,15 +109,26 @@ class HunterEngine:
 
         total_found = len(all_offers)
         for job in all_offers:
+            # Filtro adicional de calidad antes de persistir
+            qual = check_job_qualification(
+                title=job.title,
+                description=job.description,
+                country=job.country,
+                tags=job.tags,
+            )
+            if not qual.qualified:
+                logger.debug(f"Descartada antes de guardar '{job.title}': {qual.reason}")
+                continue
+
             is_new = await self.storage.save_job(job)
             if is_new:
                 new_jobs += 1
 
-        logger.info(f"Escaneo finalizado: {total_found} ofertas encontradas, {new_jobs} nuevas ingresadas a la base.")
+        logger.info(f"Escaneo finalizado: {total_found} ofertas evaluadas, {new_jobs} nuevas ingresadas a la base.")
         return {"total_found": total_found, "new_jobs": new_jobs}
 
-    async def evaluate_pending_jobs(self, limit: int = 15) -> list[tuple[JobOffer, MatchResult]]:
-        """Evalúa las vacantes pendientes con el modelo de IA."""
+    async def evaluate_pending_jobs(self, limit: int = 25) -> list[tuple[JobOffer, MatchResult]]:
+        """Evalúa las vacantes pendientes con el modelo de IA aplicando criterios estrictos."""
         profile = await self.get_active_profile()
         unseen = await self.storage.list_unseen_jobs()
         evaluated_matches: list[tuple[JobOffer, MatchResult]] = []
@@ -102,7 +140,14 @@ class HunterEngine:
             
             job.match_score = match.score
             job.match_analysis = json.dumps(match.model_dump())
-            job.status = JobStatus.EVALUATED if match.score < self.settings.match_min_score else JobStatus.SAVED
+
+            # Si el modelo determinó DESCARTAR o incompatibilidad legal/geográfica
+            if match.score <= 35 or match.verdict == "DESCARTAR":
+                job.status = JobStatus.DISCARDED
+            elif match.score < self.settings.match_min_score:
+                job.status = JobStatus.EVALUATED
+            else:
+                job.status = JobStatus.SAVED
 
             await self.storage.save_job(job)
             evaluated_matches.append((job, match))
@@ -163,4 +208,3 @@ class HunterEngine:
 
         res = await self.generate_cv_for_job(job_id)
         return res[1] if res else None
-
