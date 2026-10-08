@@ -30,8 +30,10 @@ class LinkedInJobsSource(BaseJobSource):
             "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords=Full+Stack+Engineer&location=Argentina&f_WT=2&f_TPR=r604800&start=0",
             # 3. Puestos remotos de Full Stack TypeScript / Node / Web
             "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords=Full+Stack+TypeScript+Node&location=Latin+America&f_WT=2&f_TPR=r604800&start=0",
-            # 4. Frontend / UI Engineer con TypeScript (React / Vue)
-            "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords=Frontend+Developer+TypeScript&location=Latin+America&f_WT=2&f_TPR=r604800&start=0",
+            # 4. Puestos en Neuquén (Presencial / Híbrido)
+            "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords=Desarrollador&location=Neuqu%C3%A9n%2C+Argentina&start=0",
+            "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords=Full+Stack&location=Neuqu%C3%A9n%2C+Argentina&start=0",
+            "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords=Sistemas&location=Neuqu%C3%A9n%2C+Argentina&start=0",
         ]
 
         headers = {
@@ -123,6 +125,11 @@ class LinkedInJobsSource(BaseJobSource):
 
                         seen_ids.add(job_id_ext)
 
+                        loc_lower = location.lower()
+                        is_local_neuquen = any(c in loc_lower for c in ["neuquén", "neuquen", "cipolletti", "río negro", "rio negro"])
+                        is_remote = not is_local_neuquen or ("remoto" in loc_lower or "remote" in loc_lower)
+                        tags = ["LinkedIn", "Neuquén", "Presencial/Híbrido"] if is_local_neuquen and not is_remote else ["LinkedIn", "Remote"]
+
                         # Normalizar a JobOffer
                         offer = JobOffer(
                             id=self.generate_job_id(job_id_ext),
@@ -132,10 +139,10 @@ class LinkedInJobsSource(BaseJobSource):
                             company=company,
                             url=clean_url,
                             description=description,
-                            tags=["LinkedIn", "Remote"],
+                            tags=tags,
                             salary=None,
                             country=location,
-                            is_remote=True,
+                            is_remote=is_remote,
                             published_at=published_at,
                         )
                         offers.append(offer)

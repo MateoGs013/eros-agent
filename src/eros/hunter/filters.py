@@ -33,6 +33,7 @@ GEO_EXCLUSIONS = [
 
 GEO_EXCEPTIONS = [
     re.compile(r"\b(latam|latin\s+america|argentina|worldwide|anywhere|global|international|w-8ben|contractor|remote\s+anywhere)\b", re.I),
+    re.compile(r"\b(neuqu[eé]n|cipolletti|general\s+roca|plottier|r[ií]o\s+negro|alto\s+valle)\b", re.I),
 ]
 
 

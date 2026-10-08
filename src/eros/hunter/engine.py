@@ -8,6 +8,7 @@ from eros.hunter.filters import check_job_qualification
 from eros.hunter.matcher import JobMatcher
 from eros.hunter.pitch import PitchGenerator
 from eros.hunter.sources.base import BaseJobSource
+from eros.hunter.sources.computrabajo import ComputrabajoSource
 from eros.hunter.sources.getonboard import GetOnBoardSource
 from eros.hunter.sources.hackernews import HackerNewsHiringSource
 from eros.hunter.sources.linkedin import LinkedInJobsSource
@@ -41,6 +42,7 @@ class HunterEngine:
             RemotiveSource(),
             WeWorkRemotelySource(),
             LinkedInJobsSource(),
+            ComputrabajoSource(),
             GetOnBoardSource(),
             RemoteOKSource(),
             HackerNewsHiringSource(),

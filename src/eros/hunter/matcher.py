@@ -13,7 +13,11 @@ Tu tarea es analizar ofertas laborales con rigurosidad técnica y determinar qu�
 PERFIL DE MATEO:
 - Rol Principal: Desarrollador Full Stack · Software Engineer.
 - Seniority: Semi-Senior / Mid-Level (3+ años de experiencia real construyendo software de extremo a extremo en producción).
-- Residencia y Modalidad: Vive en Argentina (UTC-3), disponibilidad remota 100%, factura como Contractor internacional independiente (B2B / W-8BEN). No posee visa de trabajo presencial en EE.UU. ni en Europa.
+- Residencia y Modalidad:
+  * Vive en Río Negro / Neuquén (Alto Valle de la Patagonia Argentina, UTC-3).
+  * Disponibilidad remota 100% (Argentina, LATAM, internacional vía Contractor B2B / W-8BEN).
+  * Disponibilidad presencial o híbrida en la provincia de Neuquén o Río Negro (Neuquén Capital, Cipolletti, Plottier, General Roca).
+  * No posee visa de trabajo presencial en EE.UU. ni en Europa.
 - Stack Backend: Node.js, Express, PostgreSQL, Prisma ORM, REST APIs, Python, Docker, Linux/VPS, diseño de bases de datos relacionales, autenticación y proxies.
 - Stack Frontend & UI: TypeScript, Vue 3, Nuxt 4, React, Next.js, Tailwind CSS, GSAP, interfaces reactivas y performance web.
 - Nivel de inglés: B2 Profesional Técnico (puede mantener reuniones de trabajo, comunicarse por escrito y leer/redactar documentación técnica con fluidez).
@@ -26,10 +30,10 @@ PERFIL DE MATEO:
 
 CRITERIOS ESTRICTOS DE EVALUACIÓN:
 1. FILTRO GEOGRÁFICO Y LEGAL (CONDICIÓN CRÍTICA):
-   - Si la posición exige residir físicamente en EE.UU., Canadá o Europa, exige contrato W-2 exclusivo, o exige Green Card / Ciudadanía estadounidense sin sponsoreo / Security Clearance (Polygraph/TS):
-     * Asignar inmediatamente: score <= 20, verdict: "DESCARTAR".
-     * En cons: "Incompatible geográficamente: requiere residencia en EE.UU./Europa o contrato W2".
-   - Si es remota abierta a LATAM, Worldwide, o permite contratación B2B/Contractor: Compatible geográficamente.
+   - Vacantes locales en Neuquén / Río Negro (presenciales o híbridas): Coincidencia ALTA (es local, accesible y conveniente para Mateo).
+   - Vacantes remotas abiertas a Argentina, LATAM, Worldwide o contratación Contractor B2B: Coincidencia ALTA.
+   - Si la vacante exige presencia física obligatoria en OTRA provincia o país lejano (ej: CABA presencial diario, Córdoba presencial, España presencial, EE.UU. presencial): score <= 20, verdict: "DESCARTAR", cons: ["Incompatible geográficamente: presencial fuera de Neuquén/Río Negro"].
+   - Si la posición exige contrato W-2 exclusivo en EE.UU., Green Card o Security Clearance (Polygraph/TS): score <= 20, verdict: "DESCARTAR", cons: ["Incompatible legalmente: requiere W2 o clearance en EE.UU."].
 
 2. SENIORITY Y ROL:
    - Posiciones ideales: Full Stack Developer, Full Stack Engineer, Software Engineer, Web Developer (Mid-Level, Semi-Senior, Senior 2 a 5 años). Coincidencia MÁXIMA (85-98%).
