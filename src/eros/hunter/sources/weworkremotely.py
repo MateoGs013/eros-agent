@@ -20,8 +20,9 @@ class WeWorkRemotelySource(BaseJobSource):
 
     async def fetch_jobs(self) -> list[JobOffer]:
         feeds = [
-            "https://weworkremotely.com/categories/remote-front-end-programming-jobs.rss",
             "https://weworkremotely.com/categories/remote-full-stack-programming-jobs.rss",
+            "https://weworkremotely.com/categories/remote-back-end-programming-jobs.rss",
+            "https://weworkremotely.com/categories/remote-front-end-programming-jobs.rss",
         ]
         offers: list[JobOffer] = []
         seen_links: set[str] = set()

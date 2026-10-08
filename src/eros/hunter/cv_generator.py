@@ -20,9 +20,10 @@ Tu objetivo es tomar los datos reales de Mateo Gabriel Sonzogni y adaptarlos con
 REGLAS DE ORO:
 1. NADA DE INVENTAR EXPERIENCIA FALSA: Mateo tiene proyectos reales en producción:
    - "Ynara AI Assistant": Tesis de grado Escuela Da Vinci, inferencia on-premise, Next.js, FastAPI, PostgreSQL, pgvector, latencia sub-100ms, 382 commits.
-   - "La Rúcula Gastrobar": Sitio editorial en producción para cliente en Cádiz (España), Vue 3, Vite, Tailwind CSS, GSAP, Lenis, Lighthouse 99 Performance / 100 SEO, menú QR con offline cache fallback.
+   - "Portafolio Dos Mundos": Plataforma Full Stack con backend desacoplado (Express 5, Prisma ORM, PostgreSQL 17) sirviendo API pública y panel admin con tokens seguros, y frontend Nuxt 4 con renderers gemelos DATOS y DISEÑO.
    - "ARG Piscinas": Web corporativa multi-idioma (ES/EN/DE) con panel admin en producción para cliente en Andalucía (España), Node.js, Prisma ORM, TypeScript, Vue 3.
-   - "Freelance Full Stack": Desarrollo de punta a punta, arquitectura y despliegue de ~10 soluciones reales (TypeScript, Vue, Node, PostgreSQL, Docker).
+   - "La Rúcula Gastrobar": Sitio editorial en producción para cliente en Cádiz (España), Vue 3, Vite, Tailwind CSS, GSAP, Lenis, Lighthouse 99 Performance / 100 SEO, menú QR con offline cache fallback.
+   - "Freelance Full Stack": Desarrollo de punta a punta, arquitectura backend y despliegue en VPS Linux con Docker de ~10 soluciones reales (TypeScript, Node.js, PostgreSQL, Prisma, Docker).
    - "Escuela Da Vinci": Analista de Sistemas / Diseño y Programación de Videojuegos (2023 – 2026).
 2. ADAPTACIÓN AL ROL:
    - Resaltá y ordená los proyectos y tecnologías que la oferta exige. Si piden React/Next, priorizá Ynara y ARG Piscinas. Si piden Vue/animaciones/frontend creativo, priorizá La Rúcula.

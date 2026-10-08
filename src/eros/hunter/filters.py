@@ -63,12 +63,15 @@ STACK_EXCLUSIONS_TITLE = [
 # ─── PALABRAS CLAVE POSITIVAS DE RELEVANCIA ──────────────────────────────────
 
 RELEVANT_TITLE_KEYWORDS = [
-    "frontend", "front-end", "front end",
     "fullstack", "full stack", "full-stack",
+    "software engineer", "software developer",
+    "web developer", "ingeniero de software",
+    "backend", "back-end", "node",
+    "frontend", "front-end", "front end",
+    "typescript", "javascript",
     "vue", "nuxt", "react", "next",
-    "typescript", "javascript", "web developer",
-    "creative developer", "ui engineer", "software engineer",
-    "desarrollador", "ingeniero de software",
+    "creative developer", "ui engineer",
+    "desarrollador",
 ]
 
 
@@ -91,8 +94,8 @@ def check_job_qualification(
 
     # 1. Filtro de Relevancia de Rol
     has_role_match = any(kw in title_lower for kw in RELEVANT_TITLE_KEYWORDS)
-    if not has_role_match and not any(kw in tag_str for kw in ["frontend", "fullstack", "vue", "react", "typescript"]):
-        return QualificationResult(False, "Rol fuera de foco (no es Frontend/Fullstack/Web)")
+    if not has_role_match and not any(kw in tag_str for kw in ["fullstack", "full-stack", "software", "backend", "node", "frontend", "vue", "react", "typescript"]):
+        return QualificationResult(False, "Rol fuera de foco (no es Full Stack/Backend/Frontend/Web)")
 
     # 2. Exclusiones de Stack en Título
     for pat in STACK_EXCLUSIONS_TITLE:

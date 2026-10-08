@@ -24,14 +24,14 @@ class LinkedInJobsSource(BaseJobSource):
 
     async def fetch_jobs(self) -> list[JobOffer]:
         queries = [
-            # 1. Puestos remotos de Frontend en LATAM
-            "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords=Frontend+Developer&location=Latin+America&f_WT=2&f_TPR=r604800&start=0",
-            # 2. Puestos remotos de Full Stack en Argentina / LATAM
-            "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords=Full+Stack+Developer&location=Argentina&f_WT=2&f_TPR=r604800&start=0",
-            # 3. Puestos remotos de React / Vue / TypeScript en LATAM
-            "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords=React+Vue+TypeScript&location=Latin+America&f_WT=2&f_TPR=r604800&start=0",
-            # 4. Creative Developer & UI Engineer remoto
-            "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords=Creative+Developer+Frontend&f_WT=2&f_TPR=r2592000&start=0",
+            # 1. Puestos remotos de Full Stack en LATAM (Prioridad principal)
+            "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords=Full+Stack+Developer&location=Latin+America&f_WT=2&f_TPR=r604800&start=0",
+            # 2. Puestos remotos de Full Stack en Argentina
+            "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords=Full+Stack+Engineer&location=Argentina&f_WT=2&f_TPR=r604800&start=0",
+            # 3. Puestos remotos de Full Stack TypeScript / Node / Web
+            "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords=Full+Stack+TypeScript+Node&location=Latin+America&f_WT=2&f_TPR=r604800&start=0",
+            # 4. Frontend / UI Engineer con TypeScript (React / Vue)
+            "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords=Frontend+Developer+TypeScript&location=Latin+America&f_WT=2&f_TPR=r604800&start=0",
         ]
 
         headers = {
