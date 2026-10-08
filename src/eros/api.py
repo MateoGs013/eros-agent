@@ -143,11 +143,13 @@ async def generate_cv(job_id: str):
 
 
 @app.get("/api/cv/{job_id}/html", response_class=HTMLResponse)
-async def get_cv_html(job_id: str):
+async def get_cv_html(job_id: str, auto_print: bool = False):
     """Devuelve la vista HTML imprimible del CV de la vacante."""
     html = await engine.get_cv_html_for_job(job_id)
     if not html:
         raise HTTPException(status_code=404, detail="CV no disponible para esta oferta")
+    if auto_print:
+        html = html.replace("</body>", "<script>window.addEventListener('load', () => { setTimeout(() => window.print(), 350); });</script></body>")
     return HTMLResponse(content=html, media_type="text/html")
 
 

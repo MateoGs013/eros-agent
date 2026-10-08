@@ -438,14 +438,12 @@ Generá el JSON del CV adaptado siguiendo estrictamente las instrucciones del si
         for exp in cv.experience:
             bullets = "".join(f"<li>{b}</li>" for b in exp.bullets)
             techs = f"<div class='exp-techs'><em>Tech:</em> {', '.join(exp.tech_stack)}</div>" if exp.tech_stack else ""
+            loc_str = f"{exp.location} · " if exp.location else ""
             experience_html += f"""
             <div class="exp-entry">
                 <div class="exp-header">
                     <span class="exp-title"><strong>{exp.title}</strong> — {exp.role}</span>
-                    <span class="exp-period">{exp.period}</span>
-                </div>
-                <div class="exp-sub">
-                    <span class="exp-loc">{exp.location}</span>
+                    <span class="exp-period">{loc_str}{exp.period}</span>
                 </div>
                 <ul class="exp-bullets">
                     {bullets}
@@ -509,7 +507,7 @@ Generá el JSON del CV adaptado siguiendo estrictamente las instrucciones del si
 <style>
   @page {{
     size: A4 portrait;
-    margin: 8mm 12mm 8mm 12mm;
+    margin: 6mm 10mm 6mm 10mm;
   }}
   * {{
     box-sizing: border-box;
@@ -520,15 +518,15 @@ Generá el JSON del CV adaptado siguiendo estrictamente las instrucciones del si
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Calibri", "Helvetica Neue", Arial, sans-serif;
     color: #111111;
     background: #ffffff;
-    font-size: 9.3pt;
-    line-height: 1.34;
+    font-size: 8.85pt;
+    line-height: 1.28;
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }}
   .cv-page {{
     max-width: 210mm;
     margin: 0 auto;
-    padding: 10mm 14mm;
+    padding: 8mm 12mm;
     background: #ffffff;
   }}
   @media print {{
@@ -572,30 +570,30 @@ Generá el JSON del CV adaptado siguiendo estrictamente las instrucciones del si
   /* Cabecera Harvard */
   .cv-header {{
     text-align: center;
-    margin-bottom: 7px;
+    margin-bottom: 5px;
     border-bottom: 1.5px solid #111111;
-    padding-bottom: 5px;
+    padding-bottom: 4px;
   }}
   .cv-name {{
-    font-size: 16pt;
+    font-size: 15pt;
     font-weight: 700;
     letter-spacing: 0.04em;
     color: #000000;
     margin-bottom: 2px;
   }}
   .cv-title {{
-    font-size: 10pt;
+    font-size: 9.5pt;
     font-weight: 600;
     color: #222222;
-    margin-bottom: 3px;
+    margin-bottom: 2px;
   }}
   .cv-contact {{
-    font-size: 8.6pt;
+    font-size: 8.3pt;
     color: #444444;
     display: flex;
     justify-content: center;
     flex-wrap: wrap;
-    gap: 7px;
+    gap: 6px;
   }}
   .cv-contact a {{
     color: #111111;
@@ -610,31 +608,33 @@ Generá el JSON del CV adaptado siguiendo estrictamente las instrucciones del si
 
   /* Secciones Estándar Harvard ATS */
   .cv-section {{
-    margin-top: 6px;
-    margin-bottom: 6px;
+    margin-top: 4.5px;
+    margin-bottom: 4.5px;
+    page-break-inside: avoid;
+    break-inside: avoid;
   }}
   .section-title {{
-    font-size: 9.3pt;
+    font-size: 9pt;
     font-weight: 700;
     letter-spacing: 0.05em;
     color: #000000;
     border-bottom: 1px solid #111111;
-    padding-bottom: 2px;
-    margin-bottom: 4px;
+    padding-bottom: 1.5px;
+    margin-bottom: 3px;
     text-transform: uppercase;
   }}
   .cv-summary {{
-    font-size: 8.9pt;
+    font-size: 8.6pt;
     color: #222222;
     text-align: justify;
-    line-height: 1.34;
+    line-height: 1.28;
   }}
 
   /* Skills */
   .skills-row {{
-    font-size: 8.7pt;
-    margin-bottom: 2px;
-    line-height: 1.3;
+    font-size: 8.5pt;
+    margin-bottom: 1.5px;
+    line-height: 1.25;
   }}
   .skill-category {{
     font-weight: 700;
@@ -646,57 +646,58 @@ Generá el JSON del CV adaptado siguiendo estrictamente las instrucciones del si
 
   /* Experiencia */
   .exp-entry {{
-    margin-bottom: 5.5px;
+    margin-bottom: 4px;
+    page-break-inside: avoid;
+    break-inside: avoid;
   }}
   .exp-header {{
     display: flex;
     justify-content: space-between;
-    font-size: 9.2pt;
+    font-size: 8.9pt;
   }}
   .exp-period {{
-    font-size: 8.6pt;
+    font-size: 8.4pt;
     color: #333333;
     font-weight: 500;
-  }}
-  .exp-sub {{
-    font-size: 8.3pt;
-    color: #555555;
-    margin-bottom: 1.5px;
+    white-space: nowrap;
   }}
   .exp-bullets {{
-    margin-left: 16px;
-    font-size: 8.6pt;
+    margin-left: 15px;
+    font-size: 8.4pt;
     color: #222222;
-    line-height: 1.32;
+    line-height: 1.28;
   }}
   .exp-bullets li {{
-    margin-bottom: 1.5px;
+    margin-bottom: 1px;
   }}
   .exp-techs {{
-    font-size: 8pt;
+    font-size: 7.8pt;
     color: #444444;
-    margin-top: 1.5px;
-    margin-left: 16px;
+    margin-top: 1px;
+    margin-left: 15px;
   }}
 
   /* Educación */
   .edu-entry {{
     margin-bottom: 2px;
-    font-size: 8.9pt;
+    font-size: 8.6pt;
+    page-break-inside: avoid;
+    break-inside: avoid;
   }}
   .edu-header {{
     display: flex;
     justify-content: space-between;
   }}
   .edu-period {{
-    font-size: 8.5pt;
+    font-size: 8.3pt;
     color: #333333;
+    white-space: nowrap;
   }}
   .edu-details {{
-    font-size: 8.3pt;
+    font-size: 8.1pt;
     color: #444444;
-    line-height: 1.3;
-    margin-top: 1px;
+    line-height: 1.25;
+    margin-top: 0.5px;
   }}
 </style>
 </head>
