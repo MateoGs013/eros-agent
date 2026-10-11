@@ -48,6 +48,10 @@ CRITERIOS ESTRICTOS DE EVALUACIÓN:
    - Frontend Engineer / Creative Developer moderno (Vue/Nuxt, React, TS): Coincidencia ALTA (80-92%).
    - Stacks no compatibles (WordPress, PHP legado, Drupal, Magento, Java EE clásico, C# desktop, Cobol): Asignar score <= 35, verdict: "DESCARTAR".
 
+4. COMPENSACIÓN Y ESTIMACIÓN DE SALARIO:
+   - Si la oferta especifica un salario publicado (ej: USD 3,000 - 4,500 o USD 80k/yr), validalo y devuélvelo en "salary_estimate" (ej: "USD 3,000 - 4,500 / mes").
+   - Si la oferta NO especifica salario, estimá un rango de mercado competitivo y realista para el rol, seniority y modalidad (ej: "USD 2,500 - 4,000 / mes" para remoto LATAM/Global, o "ARS 1.8M - 2.8M / mes" si es local en Argentina).
+
 Debes responder ÚNICAMENTE un objeto JSON válido con este formato:
 {
   "score": <número entero 0-100>,
@@ -56,7 +60,8 @@ Debes responder ÚNICAMENTE un objeto JSON válido con este formato:
   "pros": ["<punto a favor 1>", "<punto a favor 2>"],
   "cons": ["<punto en contra o duda 1>"],
   "missing_skills": ["<habilidad o tecnología requerida que Mateo no tiene>"],
-  "matching_projects": ["<Nombre de proyectos de Mateo que encajan perfecto con la búsqueda>"]
+  "matching_projects": ["<Nombre de proyectos de Mateo que encajan perfecto con la búsqueda>"],
+  "salary_estimate": "<Rango salarial estimado o publicado, ej: 'USD 2,500 - 4,000 / mes' o 'USD 50k - 75k / año'>"
 }
 """
 
@@ -106,7 +111,8 @@ Devolve exclusivamente el JSON de evaluación.
                 pros=data.get("pros", []),
                 cons=data.get("cons", []),
                 missing_skills=data.get("missing_skills", []),
-                matching_projects=data.get("matching_projects", [])
+                matching_projects=data.get("matching_projects", []),
+                salary_estimate=data.get("salary_estimate")
             )
         except Exception as e:
             logger.error(f"Error evaluando oferta '{job.title}': {e}. Usando fallback.")
@@ -117,5 +123,6 @@ Devolve exclusivamente el JSON de evaluación.
                 pros=["Posición de ingeniería de software", "Remoto compatible"],
                 cons=["Se requiere revisión manual"],
                 missing_skills=[],
-                matching_projects=["Portafolio Dos Mundos"]
+                matching_projects=["Portafolio Dos Mundos"],
+                salary_estimate=None
             )

@@ -78,6 +78,7 @@ class MatchResult(BaseModel):
     cons: list[str] = Field(default_factory=list)
     missing_skills: list[str] = Field(default_factory=list)
     matching_projects: list[str] = Field(default_factory=list)
+    salary_estimate: str | None = None
 
 
 class PitchDraft(BaseModel):

@@ -92,9 +92,9 @@ class JobStorage:
             else:
                 await db.execute("""
                     UPDATE jobs SET
-                        status = ?, match_score = ?, match_analysis = ?, pitch_draft = ?, tailored_cv = ?
+                        status = ?, match_score = ?, match_analysis = ?, pitch_draft = ?, tailored_cv = ?, salary = ?
                     WHERE id = ?
-                """, (job.status.value, job.match_score, job.match_analysis, job.pitch_draft, job.tailored_cv, job.id))
+                """, (job.status.value, job.match_score, job.match_analysis, job.pitch_draft, job.tailored_cv, job.salary, job.id))
 
             await db.commit()
             return not exists

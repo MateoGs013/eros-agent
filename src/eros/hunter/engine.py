@@ -166,6 +166,8 @@ class HunterEngine:
             
             job.match_score = match.score
             job.match_analysis = json.dumps(match.model_dump())
+            if (not job.salary or not job.salary.strip()) and match.salary_estimate:
+                job.salary = match.salary_estimate
 
             # Si el modelo determinó DESCARTAR o incompatibilidad legal/geográfica
             if match.score <= 35 or match.verdict == "DESCARTAR":
@@ -197,6 +199,8 @@ class HunterEngine:
         match = await self.matcher.evaluate(job, profile)
         job.match_score = match.score
         job.match_analysis = json.dumps(match.model_dump())
+        if (not job.salary or not job.salary.strip()) and match.salary_estimate:
+            job.salary = match.salary_estimate
 
         if match.score <= 35 or match.verdict == "DESCARTAR":
             job.status = JobStatus.DISCARDED
