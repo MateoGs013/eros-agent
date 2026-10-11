@@ -180,6 +180,34 @@ class HunterEngine:
 
         return evaluated_matches
 
+    async def evaluate_single_job(self, job_id: str) -> tuple[JobOffer, MatchResult] | None:
+        """Evalúa una única vacante específica con el modelo LLM bajo demanda."""
+        job = await self.storage.get_job(job_id)
+        if not job:
+            return None
+
+        profile = await self.get_active_profile()
+        min_score_str = await self.storage.get_setting("match_min_score", str(self.settings.match_min_score))
+        try:
+            min_score = int(min_score_str) if min_score_str else self.settings.match_min_score
+        except ValueError:
+            min_score = self.settings.match_min_score
+
+        logger.info(f"Evaluando vacante individual: {job.title} en {job.company}...")
+        match = await self.matcher.evaluate(job, profile)
+        job.match_score = match.score
+        job.match_analysis = json.dumps(match.model_dump())
+
+        if match.score <= 35 or match.verdict == "DESCARTAR":
+            job.status = JobStatus.DISCARDED
+        elif match.score < min_score:
+            job.status = JobStatus.EVALUATED
+        else:
+            job.status = JobStatus.SAVED
+
+        await self.storage.save_job(job)
+        return job, match
+
     async def generate_pitch_for_job(self, job_id: str) -> PitchDraft | None:
         """Genera un pitch personalizado para una vacante específica."""
         job = await self.storage.get_job(job_id)

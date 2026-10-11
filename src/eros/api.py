@@ -380,6 +380,16 @@ async def trigger_evaluate(limit: int = 15):
     }
 
 
+@app.post("/api/jobs/{job_id}/evaluate", dependencies=[Depends(verify_auth)])
+async def evaluate_single_job_endpoint(job_id: str):
+    """Evalúa una única vacante bajo demanda con Gemini."""
+    res = await engine.evaluate_single_job(job_id)
+    if not res:
+        raise HTTPException(status_code=404, detail="Oferta no encontrada")
+    job, match = res
+    return {"ok": True, "job": job, "match": match}
+
+
 @app.post("/api/pitch/{job_id}", dependencies=[Depends(verify_auth)])
 async def generate_pitch(job_id: str):
     """Genera una propuesta personalizada conectada con el portafolio."""
