@@ -142,6 +142,33 @@ class JobStorage:
                 rows = await cursor.fetchall()
                 return [self._row_to_job(r) for r in rows]
 
+    async def list_all_jobs(self, status: str | None = None, min_score: int = 0, limit: int = 200) -> list[JobOffer]:
+        """Devuelve todas las vacantes guardadas en la base de datos sin excluir estados salvo que se pida."""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            conditions: list[str] = []
+            params: list[Any] = []
+
+            if status:
+                conditions.append("status = ?")
+                params.append(status)
+            elif min_score > 0:
+                conditions.append("match_score >= ? AND status != ?")
+                params.extend([min_score, JobStatus.DISCARDED.value])
+
+            where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+            query = f"""
+                SELECT * FROM jobs
+                {where_clause}
+                ORDER BY COALESCE(match_score, 0) DESC, found_at DESC
+                LIMIT ?
+            """
+            params.append(limit)
+
+            async with db.execute(query, tuple(params)) as cursor:
+                rows = await cursor.fetchall()
+                return [self._row_to_job(r) for r in rows]
+
     async def update_job_status(self, job_id: str, status: JobStatus) -> None:
         """Actualiza el estado de una vacante (ej: aplicada, descartada)."""
         async with aiosqlite.connect(self.db_path) as db:

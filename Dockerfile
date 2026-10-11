@@ -22,6 +22,7 @@ COPY src/ /app/src/
 
 # Crear directorio de datos para SQLite local o caché
 RUN mkdir -p /app/data
+VOLUME ["/app/data"]
 
 # Puerto expuesto para comunicación interna con el admin panel
 EXPOSE 8000

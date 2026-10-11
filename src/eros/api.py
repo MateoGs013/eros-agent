@@ -321,12 +321,10 @@ async def get_stats():
 async def list_jobs(
     min_score: int = Query(0, ge=0, le=100),
     status: str | None = None,
-    limit: int = Query(50, ge=1, le=200)
+    limit: int = Query(100, ge=1, le=500)
 ):
-    """Lista las ofertas con filtros de puntaje y estado."""
-    jobs = await engine.storage.list_matched_jobs(min_score=min_score, limit=limit)
-    if status:
-        jobs = [j for j in jobs if j.status.value == status]
+    """Lista las ofertas con filtros de puntaje y estado sin excluir estados salvo que se especifique."""
+    jobs = await engine.storage.list_all_jobs(status=status, min_score=min_score, limit=limit)
     return {"data": jobs, "count": len(jobs)}
 
 
