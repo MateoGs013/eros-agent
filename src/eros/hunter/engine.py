@@ -24,6 +24,12 @@ from eros.models import (
     ProfileContext,
     TailoredCV,
 )
+from eros.hunter.embeddings import (
+    build_job_vector_text,
+    build_profile_vector_text,
+    cosine_similarity,
+    normalize_semantic_score,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -96,12 +102,29 @@ class HunterEngine:
         """Alias para purga completa de vacantes no calificadas/descartadas."""
         return await self.purge_incompatible_and_discarded_jobs()
 
+    async def get_or_create_profile_vector(self, force_refresh: bool = False) -> list[float]:
+        """Obtiene el vector embedding del perfil de Mateo, generándolo si no existe."""
+        if not force_refresh:
+            cached_vec = await self.storage.get_profile_vector()
+            if cached_vec and len(cached_vec) > 0:
+                return cached_vec
+
+        profile = await self.get_active_profile()
+        profile_text = build_profile_vector_text(profile)
+        vec = await self.matcher.llm.embed_text(profile_text)
+        if vec:
+            await self.storage.save_profile_vector(vec)
+            logger.info("Vector semántico del perfil de Mateo generado y guardado en SQLite.")
+        return vec
+
     async def sync_profile(self) -> ProfileContext:
         """Actualiza y guarda en caché el perfil más reciente de Mateo desde la API."""
         logger.info("Sincronizando perfil desde la API del portafolio...")
         profile = await self.portfolio_client.fetch_profile()
         await self.storage.save_profile_cache(profile)
         logger.info(f"Perfil sincronizado: {profile.name} con {len(profile.projects)} proyectos y {len(profile.tech_stack)} tecnologías.")
+        # Regenerar vector del perfil actualizado
+        await self.get_or_create_profile_vector(force_refresh=True)
         return profile
 
     async def get_active_profile(self) -> ProfileContext:
@@ -110,6 +133,61 @@ class HunterEngine:
         if cached:
             return cached
         return await self.sync_profile()
+
+    async def vectorize_and_score_jobs(self, jobs: list[JobOffer]) -> int:
+        """Genera embeddings y calcula el puntaje semántico en batch para una lista de ofertas."""
+        if not jobs:
+            return 0
+
+        profile_vec = await self.get_or_create_profile_vector()
+        if not profile_vec:
+            logger.warning("No se pudo obtener el vector del perfil; omitiendo scoring vectorial.")
+            return 0
+
+        texts = [build_job_vector_text(j) for j in jobs]
+        embeddings = await self.matcher.llm.batch_embed_texts(texts)
+
+        updated_count = 0
+        for j, emb in zip(jobs, embeddings):
+            if emb:
+                cos_sim = cosine_similarity(profile_vec, emb)
+                semantic_score = normalize_semantic_score(cos_sim)
+                j.embedding = emb
+                j.semantic_score = semantic_score
+                await self.storage.update_job_embedding(j.id, emb, semantic_score)
+                updated_count += 1
+
+        logger.info(f"Vectorización completada: {updated_count}/{len(jobs)} vacantes vectorizadas con éxito.")
+        return updated_count
+
+    async def backfill_missing_embeddings(self, limit: int = 100) -> int:
+        """Vectoriza vacantes existentes en la base que aún no tengan embedding."""
+        all_jobs = await self.storage.list_all_jobs(limit=1000)
+        unembedded = [j for j in all_jobs if not j.embedding or len(j.embedding) == 0][:limit]
+        if not unembedded:
+            return 0
+        logger.info(f"Iniciando vectorización retroactiva de {len(unembedded)} vacantes...")
+        return await self.vectorize_and_score_jobs(unembedded)
+
+    async def semantic_search(self, query: str, limit: int = 30) -> list[JobOffer]:
+        """Realiza una búsqueda semántica de vacantes ordenadas por similitud con la consulta."""
+        if not query or not query.strip():
+            return await self.storage.list_all_jobs(limit=limit)
+
+        query_vec = await self.matcher.llm.embed_text(query.strip())
+        if not query_vec:
+            return []
+
+        all_jobs = await self.storage.list_all_jobs(limit=500)
+        jobs_with_scores: list[tuple[JobOffer, float]] = []
+
+        for j in all_jobs:
+            if j.embedding and len(j.embedding) > 0:
+                sim = cosine_similarity(query_vec, j.embedding)
+                jobs_with_scores.append((j, sim))
+
+        jobs_with_scores.sort(key=lambda x: x[1], reverse=True)
+        return [j for j, _ in jobs_with_scores[:limit]]
 
     async def run_scan(self) -> dict[str, int]:
         """Ejecuta una búsqueda en todas las fuentes curadas y guarda únicamente las ofertas calificadas."""
@@ -143,6 +221,7 @@ class HunterEngine:
                 logger.error(f"Falla en conector de ofertas: {res}")
 
         total_found = len(all_offers)
+        newly_saved_jobs: list[JobOffer] = []
         for job in all_offers:
             if remote_only and not job.is_remote:
                 continue
@@ -161,6 +240,11 @@ class HunterEngine:
             is_new = await self.storage.save_job(job)
             if is_new:
                 new_jobs += 1
+                newly_saved_jobs.append(job)
+
+        # Vectorizar y calcular score semántico en batch para las nuevas ofertas
+        if newly_saved_jobs:
+            await self.vectorize_and_score_jobs(newly_saved_jobs)
 
         logger.info(f"Escaneo finalizado: {total_found} ofertas evaluadas, {new_jobs} nuevas ingresadas a la base.")
         return {"total_found": total_found, "new_jobs": new_jobs}
@@ -171,6 +255,11 @@ class HunterEngine:
         unseen = await self.storage.list_unseen_jobs()
         evaluated_matches: list[tuple[JobOffer, MatchResult]] = []
 
+        # Asegurar que las vacantes pendientes estén vectorizadas
+        unembedded = [j for j in unseen[:limit] if not j.embedding or len(j.embedding) == 0]
+        if unembedded:
+            await self.vectorize_and_score_jobs(unembedded)
+
         # Obtener umbral dinámico de la base de datos
         min_score_str = await self.storage.get_setting("match_min_score", str(self.settings.match_min_score))
         try:
@@ -178,9 +267,17 @@ class HunterEngine:
         except ValueError:
             min_score = self.settings.match_min_score
 
-        batch = unseen[:limit]
+        # Ordenar vacantes pendientes por afinidad semántica descendente (las mejores primero)
+        batch = sorted(unseen[:limit], key=lambda j: (j.semantic_score or 0), reverse=True)
         for job in batch:
-            logger.info(f"Evaluando compatibilidad: {job.title} en {job.company}...")
+            # Pre-filtro semántico: Si el score vectorial es muy bajo (< 35%), descartar de inmediato sin gastar llamadas
+            if job.semantic_score is not None and job.semantic_score < 35:
+                logger.info(f"Descarte semántico automático (<35%): {job.title} ({job.semantic_score}%)")
+                job.status = JobStatus.DISCARDED
+                await self.storage.save_job(job)
+                continue
+
+            logger.info(f"Evaluando compatibilidad: {job.title} en {job.company} (Semántico: {job.semantic_score or 0}%)...")
             match = await self.matcher.evaluate(job, profile)
             
             job.match_score = match.score

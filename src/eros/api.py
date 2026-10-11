@@ -94,6 +94,11 @@ class ConfigUpdateRequest(BaseModel):
     sources: dict[str, bool] | None = None
 
 
+class SemanticSearchRequest(BaseModel):
+    query: str
+    limit: int = 30
+
+
 # ==============================================================================
 # Seguridad y Autenticación
 # ==============================================================================
@@ -334,6 +339,20 @@ async def get_job(job_id: str):
     if not job:
         raise HTTPException(status_code=404, detail="Oferta no encontrada")
     return {"data": job}
+
+
+@app.post("/api/jobs/semantic-search", dependencies=[Depends(verify_auth)])
+async def semantic_search_jobs(body: SemanticSearchRequest):
+    """Busca ofertas ordenadas por afinidad semántica vectorial con la consulta."""
+    jobs = await engine.semantic_search(body.query, limit=body.limit)
+    return {"data": jobs, "count": len(jobs), "query": body.query}
+
+
+@app.post("/api/vectorize", dependencies=[Depends(verify_auth)])
+async def trigger_vectorize(limit: int = 100):
+    """Vectoriza vacantes pendientes o existentes sin embedding."""
+    count = await engine.backfill_missing_embeddings(limit=limit)
+    return {"ok": True, "vectorized_count": count}
 
 
 @app.post("/api/scan", dependencies=[Depends(verify_auth)])

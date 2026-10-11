@@ -37,15 +37,35 @@ class JobStorage:
                     match_score INTEGER,
                     match_analysis TEXT,
                     pitch_draft TEXT,
-                    tailored_cv TEXT
+                    tailored_cv TEXT,
+                    semantic_score INTEGER,
+                    embedding TEXT
                 )
             """)
 
-            # Migración idempotente para bases de datos existentes
+            # Migraciones idempotentes para bases de datos existentes
             try:
                 await db.execute("ALTER TABLE jobs ADD COLUMN tailored_cv TEXT")
             except Exception:
                 pass
+
+            try:
+                await db.execute("ALTER TABLE jobs ADD COLUMN semantic_score INTEGER")
+            except Exception:
+                pass
+
+            try:
+                await db.execute("ALTER TABLE jobs ADD COLUMN embedding TEXT")
+            except Exception:
+                pass
+
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS vector_cache (
+                    key TEXT PRIMARY KEY,
+                    embedding TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+            """)
 
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS profile_cache (
@@ -75,26 +95,32 @@ class JobStorage:
                 exists = await cursor.fetchone() is not None
 
             tags_json = json.dumps(job.tags)
+            embedding_json = json.dumps(job.embedding) if job.embedding else None
             if not exists:
                 await db.execute("""
                     INSERT INTO jobs (
                         id, source, external_id, title, company, url, description,
                         tags, salary, country, is_remote, published_at, found_at,
-                        status, match_score, match_analysis, pitch_draft, tailored_cv
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        status, match_score, match_analysis, pitch_draft, tailored_cv,
+                        semantic_score, embedding
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     job.id, job.source, job.external_id, job.title, job.company, job.url,
                     job.description, tags_json, job.salary, job.country,
                     1 if job.is_remote else 0, job.published_at, job.found_at,
                     job.status.value, job.match_score, job.match_analysis, job.pitch_draft,
-                    job.tailored_cv
+                    job.tailored_cv, job.semantic_score, embedding_json
                 ))
             else:
                 await db.execute("""
                     UPDATE jobs SET
-                        status = ?, match_score = ?, match_analysis = ?, pitch_draft = ?, tailored_cv = ?, salary = ?
+                        status = ?, match_score = ?, match_analysis = ?, pitch_draft = ?,
+                        tailored_cv = ?, salary = ?, semantic_score = ?, embedding = ?
                     WHERE id = ?
-                """, (job.status.value, job.match_score, job.match_analysis, job.pitch_draft, job.tailored_cv, job.salary, job.id))
+                """, (
+                    job.status.value, job.match_score, job.match_analysis, job.pitch_draft,
+                    job.tailored_cv, job.salary, job.semantic_score, embedding_json, job.id
+                ))
 
             await db.commit()
             return not exists
@@ -223,6 +249,17 @@ class JobStorage:
                 tags = json.loads(row["tags"])
             except Exception:
                 pass
+
+        keys = row.keys() if hasattr(row, "keys") else []
+        tailored_cv = row["tailored_cv"] if "tailored_cv" in keys else None
+        semantic_score = row["semantic_score"] if "semantic_score" in keys else None
+        embedding = None
+        if "embedding" in keys and row["embedding"]:
+            try:
+                embedding = json.loads(row["embedding"])
+            except Exception:
+                pass
+
         return JobOffer(
             id=row["id"],
             source=row["source"],
@@ -241,8 +278,57 @@ class JobStorage:
             match_score=row["match_score"],
             match_analysis=row["match_analysis"],
             pitch_draft=row["pitch_draft"],
-            tailored_cv=row["tailored_cv"] if "tailored_cv" in row.keys() else None
+            tailored_cv=tailored_cv,
+            semantic_score=semantic_score,
+            embedding=embedding,
         )
+
+    async def update_job_embedding(self, job_id: str, embedding: list[float], semantic_score: int) -> None:
+        """Actualiza el vector embedding y score semántico de una vacante."""
+        emb_json = json.dumps(embedding)
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                "UPDATE jobs SET embedding = ?, semantic_score = ? WHERE id = ?",
+                (emb_json, semantic_score, job_id)
+            )
+            await db.commit()
+
+    async def save_profile_vector(self, embedding: list[float]) -> None:
+        """Guarda en caché el vector del perfil de Mateo."""
+        emb_json = json.dumps(embedding)
+        now = datetime.now(timezone.utc).isoformat()
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS vector_cache (
+                    key TEXT PRIMARY KEY,
+                    embedding TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+            """)
+            await db.execute(
+                "INSERT INTO vector_cache (key, embedding, updated_at) VALUES ('profile_vector', ?, ?) ON CONFLICT(key) DO UPDATE SET embedding = ?, updated_at = ?",
+                (emb_json, now, emb_json, now)
+            )
+            await db.commit()
+
+    async def get_profile_vector(self) -> list[float] | None:
+        """Recupera el vector de perfil en caché si existe."""
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                await db.execute("""
+                    CREATE TABLE IF NOT EXISTS vector_cache (
+                        key TEXT PRIMARY KEY,
+                        embedding TEXT NOT NULL,
+                        updated_at TEXT NOT NULL
+                    )
+                """)
+                async with db.execute("SELECT embedding FROM vector_cache WHERE key = 'profile_vector'") as cursor:
+                    row = await cursor.fetchone()
+                    if row and row[0]:
+                        return json.loads(row[0])
+        except Exception:
+            pass
+        return None
 
     async def get_setting(self, key: str, default: str | None = None) -> str | None:
         """Obtiene un valor de configuración persistente del agente."""

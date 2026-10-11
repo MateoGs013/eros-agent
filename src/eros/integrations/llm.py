@@ -154,3 +154,69 @@ class LLMClient:
             })
         
         return "Hola! Soy Eros Agent. He evaluado la posición. Cumple con el stack de desarrollo frontend y arquitectura web."
+
+    async def embed_text(self, text: str) -> list[float]:
+        """Genera un vector embedding de 3072 dimensiones con Gemini."""
+        if not self.settings.gemini_api_key:
+            logger.warning("GEMINI_API_KEY no configurado para embeddings.")
+            return []
+
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key={self.settings.gemini_api_key}"
+        payload = {
+            "model": "models/gemini-embedding-001",
+            "taskType": "SEMANTIC_SIMILARITY",
+            "content": {
+                "parts": [{"text": text[:3500]}]
+            }
+        }
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(url, json=payload)
+            if resp.status_code != 200:
+                logger.error(f"Gemini Embedding API error HTTP {resp.status_code}: {resp.text}")
+                return []
+            data = resp.json()
+            return data.get("embedding", {}).get("values", [])
+
+    async def batch_embed_texts(self, texts: list[str]) -> list[list[float]]:
+        """Genera vectores embeddings para una lista de textos en una sola petición batch."""
+        if not texts:
+            return []
+        if not self.settings.gemini_api_key:
+            logger.warning("GEMINI_API_KEY no configurado para embeddings batch.")
+            return [[] for _ in texts]
+
+        # Dividir en chunks de máximo 50 para evitar exceder límites de payload
+        chunk_size = 50
+        all_embeddings: list[list[float]] = []
+
+        for i in range(0, len(texts), chunk_size):
+            chunk = texts[i:i + chunk_size]
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:batchEmbedContents?key={self.settings.gemini_api_key}"
+            requests = [
+                {
+                    "model": "models/gemini-embedding-001",
+                    "taskType": "SEMANTIC_SIMILARITY",
+                    "content": {"parts": [{"text": t[:3500]}]}
+                }
+                for t in chunk
+            ]
+            try:
+                async with httpx.AsyncClient(timeout=45.0) as client:
+                    resp = await client.post(url, json={"requests": requests})
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        embeddings = [e.get("values", []) for e in data.get("embeddings", [])]
+                        all_embeddings.extend(embeddings)
+                    else:
+                        logger.warning(f"Batch embedding falló con HTTP {resp.status_code}. Pasando a uno a uno...")
+                        for t in chunk:
+                            emb = await self.embed_text(t)
+                            all_embeddings.append(emb)
+            except Exception as e:
+                logger.error(f"Excepción en batch embed: {e}")
+                for t in chunk:
+                    emb = await self.embed_text(t)
+                    all_embeddings.append(emb)
+
+        return all_embeddings

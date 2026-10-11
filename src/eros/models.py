@@ -34,6 +34,8 @@ class JobOffer(BaseModel):
     match_analysis: str | None = None
     pitch_draft: str | None = None
     tailored_cv: str | None = None
+    semantic_score: int | None = None
+    embedding: list[float] | None = None
 
 
 class CVProject(BaseModel):
