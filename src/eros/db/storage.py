@@ -181,6 +181,23 @@ class JobStorage:
             await db.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
             await db.commit()
 
+    async def purge_unqualified_and_discarded_jobs(self, ids: list[str]) -> int:
+        """Elimina físicamente una lista de vacantes por ID de la base de datos."""
+        if not ids:
+            return 0
+        async with aiosqlite.connect(self.db_path) as db:
+            placeholders = ",".join("?" for _ in ids)
+            cursor = await db.execute(f"DELETE FROM jobs WHERE id IN ({placeholders})", tuple(ids))
+            await db.commit()
+            return cursor.rowcount
+
+    async def delete_all_discarded_jobs(self) -> int:
+        """Elimina físicamente todas las vacantes en estado descartado."""
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute("DELETE FROM jobs WHERE status = ?", (JobStatus.DISCARDED.value,))
+            await db.commit()
+            return cursor.rowcount
+
     async def save_profile_cache(self, profile: ProfileContext) -> None:
         """Guarda el perfil de Mateo en caché local."""
         async with aiosqlite.connect(self.db_path) as db:

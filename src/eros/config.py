@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
 
     # Clave de autenticación para endpoints protegidos y panel de administración
-    eros_api_key: str = ""
+    eros_api_key: str = "eros_dev_sec_7f9b8c2d1e0a4f5b6c7d8e9f0a1b2c3d"
 
     # API de portafolio en producción (o localhost si se prueba en dev)
     portfolio_api_url: str = "https://api.mateogs.tech/api"

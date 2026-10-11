@@ -56,26 +56,45 @@ class HunterEngine:
         if not cached:
             await self.sync_profile()
 
-    async def clean_existing_unqualified_jobs(self) -> int:
-        """Purga o marca como descartadas vacantes previas incompatibles (US-only, etc.)."""
-        purged = 0
+    async def purge_incompatible_and_discarded_jobs(self) -> int:
+        """Purga y elimina físicamente de la base de datos las vacantes incompatibles y descartadas."""
+        deleted_count = 0
         try:
-            all_jobs = await self.storage.list_matched_jobs(min_score=0, limit=500)
+            all_jobs = await self.storage.list_all_jobs(limit=1000)
+            ids_to_purge: set[str] = set()
+
             for j in all_jobs:
+                # 1. Ya en estado descartado
+                if j.status == JobStatus.DISCARDED:
+                    ids_to_purge.add(j.id)
+                    continue
+
+                # 2. Incompatible por filtros geográficos o stack
                 qual = check_job_qualification(
                     title=j.title,
                     description=j.description,
                     country=j.country,
                     tags=j.tags,
                 )
-                if not qual.qualified or (j.match_score is not None and j.match_score <= 35):
-                    await self.storage.update_job_status(j.id, JobStatus.DISCARDED)
-                    purged += 1
-            if purged > 0:
-                logger.info(f"Limpieza de base: se marcaron {purged} vacantes obsoletas/incompatibles como DESCARTADAS.")
+                if not qual.qualified:
+                    ids_to_purge.add(j.id)
+                    continue
+
+                # 3. Match score evaluado muy bajo (<= 35%)
+                if j.match_score is not None and j.match_score <= 35:
+                    ids_to_purge.add(j.id)
+                    continue
+
+            if ids_to_purge:
+                deleted_count = await self.storage.purge_unqualified_and_discarded_jobs(list(ids_to_purge))
+                logger.info(f"Purga física ejecutada: {deleted_count} vacantes incompatibles/descartadas eliminadas de SQLite.")
         except Exception as e:
-            logger.warning(f"Error durante limpieza de vacantes obsoletas: {e}")
-        return purged
+            logger.warning(f"Error durante purga de vacantes incompatibles: {e}")
+        return deleted_count
+
+    async def clean_existing_unqualified_jobs(self) -> int:
+        """Alias para purga completa de vacantes no calificadas/descartadas."""
+        return await self.purge_incompatible_and_discarded_jobs()
 
     async def sync_profile(self) -> ProfileContext:
         """Actualiza y guarda en caché el perfil más reciente de Mateo desde la API."""
