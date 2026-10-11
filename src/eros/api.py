@@ -16,25 +16,38 @@ from eros.config import get_settings
 from eros.hunter.engine import HunterEngine
 from eros.models import JobStatus
 from eros.ui import HTML_DASHBOARD
+from eros.content.models import (
+    ContentGenerateRequest,
+    ContentPostStatus,
+    ContentStatusUpdateRequest,
+)
+from eros.content.storage import ContentStorage
+from eros.content.generator import ContentGenerator
+from eros.content.carousel import CarouselRenderer
+from eros.content.dispatcher import ContentDispatcher
 
 logger = logging.getLogger("eros.api")
 
 engine = HunterEngine()
 settings = get_settings()
+content_storage = ContentStorage()
+content_generator = ContentGenerator(storage=content_storage, engine=engine)
+content_dispatcher = ContentDispatcher(storage=content_storage)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Inicializar base de datos y sincronizar perfil inicial
     await engine.initialize()
-    logger.info("Eros Hunter API inicializada.")
+    await content_storage.init_db()
+    logger.info("Eros Hunter API y Content Engine inicializados.")
     yield
 
 
 app = FastAPI(
-    title="Eros Job Hunter API",
-    version="0.2.0",
-    description="API y Control Center seguro del Agente Job Hunter",
+    title="Eros Career OS & Job Hunter API",
+    version="0.3.0",
+    description="API y Control Center seguro del Agente Eros (Job Hunter + Content Engine)",
     lifespan=lifespan,
 )
 
@@ -413,3 +426,96 @@ async def sync_profile():
     """Fuerza la sincronización del perfil desde la API del portafolio."""
     profile = await engine.sync_profile()
     return {"ok": True, "profile": profile}
+
+
+# ==============================================================================
+# Endpoints de Generación y Distribución de Contenido (Career OS)
+# ==============================================================================
+
+@app.post("/api/content/generate", dependencies=[Depends(verify_auth)])
+async def generate_content(body: ContentGenerateRequest):
+    """Genera una publicación técnica omnicanal (LinkedIn, X/Twitter, Dev.to, Carousel 5 slides)."""
+    try:
+        post = await content_generator.generate_post(body)
+        return {"ok": True, "data": post}
+    except Exception as e:
+        logger.error(f"Error generando contenido: {e}")
+        raise HTTPException(status_code=500, detail=f"Falla generando contenido: {str(e)}")
+
+
+@app.get("/api/content/posts", dependencies=[Depends(verify_auth)])
+async def list_content_posts(
+    status: ContentPostStatus | None = None,
+    limit: int = Query(50, ge=1, le=100)
+):
+    """Lista las publicaciones creadas con opción de filtrado por estado."""
+    posts = await content_storage.list_posts(status=status, limit=limit)
+    return {"data": posts, "count": len(posts)}
+
+
+@app.get("/api/content/posts/{post_id}", dependencies=[Depends(verify_auth)])
+async def get_content_post(post_id: str):
+    """Devuelve una publicación por ID con todas sus plataformas y slides."""
+    post = await content_storage.get_post(post_id)
+    if not post:
+        raise HTTPException(status_code=404, detail="Publicación no encontrada")
+    return {"data": post}
+
+
+@app.patch("/api/content/posts/{post_id}/status", dependencies=[Depends(verify_auth)])
+async def update_content_post_status(post_id: str, body: ContentStatusUpdateRequest):
+    """Actualiza el estado de una publicación (draft, approved, published, rejected)."""
+    post = await content_storage.get_post(post_id)
+    if not post:
+        raise HTTPException(status_code=404, detail="Publicación no encontrada")
+
+    await content_storage.update_status(post_id, body.status)
+    return {"ok": True, "post_id": post_id, "new_status": body.status}
+
+
+@app.post("/api/content/posts/{post_id}/publish", dependencies=[Depends(verify_auth)])
+async def publish_content_post(post_id: str):
+    """Aprueba la publicación y la despacha al webhook de n8n para distribución."""
+    res = await content_dispatcher.publish_post(post_id)
+    if not res.get("ok"):
+        raise HTTPException(status_code=502, detail=res.get("error", "Error despachando a n8n"))
+    return res
+
+
+@app.delete("/api/content/posts/{post_id}", dependencies=[Depends(verify_auth)])
+async def delete_content_post(post_id: str):
+    """Elimina una publicación."""
+    post = await content_storage.get_post(post_id)
+    if not post:
+        raise HTTPException(status_code=404, detail="Publicación no encontrada")
+
+    await content_storage.delete_post(post_id)
+    return {"ok": True, "deleted": post_id}
+
+
+@app.get("/api/content/carousel/{post_id}/html", response_class=HTMLResponse)
+async def get_carousel_html(post_id: str, auto_print: bool = False):
+    """Devuelve la vista interactiva e imprimible (Print to PDF de LinkedIn) de las diapositivas."""
+    post = await content_storage.get_post(post_id)
+    if not post:
+        raise HTTPException(status_code=404, detail="Publicación no encontrada")
+
+    html = CarouselRenderer.render_html(post, auto_print=auto_print)
+    return HTMLResponse(content=html, media_type="text/html")
+
+
+@app.post("/api/webhooks/n8n/callback")
+async def n8n_callback(payload: dict[str, Any]):
+    """Webhook receptor de confirmación desde n8n cuando se ejecuta un workflow."""
+    logger.info(f"Callback recibido desde n8n: {payload}")
+    post_id = payload.get("post_id")
+    status_str = payload.get("status", "published")
+    if post_id:
+        new_status = ContentPostStatus.PUBLISHED if status_str == "published" else ContentPostStatus.REJECTED
+        await content_storage.update_status(
+            post_id,
+            new_status,
+            n8n_response=json.dumps(payload.get("details", payload))
+        )
+    return {"ok": True, "received": True}
+

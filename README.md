@@ -1,94 +1,96 @@
-# Eros Agent — Autonomous Job Hunter & CV Matcher
+# Eros Career OS — Autonomous Job Hunter, CV Matcher & Content Engine
 
-Agente personal autónomo diseñado para monitorear vacantes de empleo (remoto USD / LATAM), evaluar compatibilidad técnica en tiempo real contra el portafolio y CV de Mateo usando Google Gemini, y gestionar postulaciones directamente desde el **Panel Admin del Portafolio** (`https://api.mateogs.tech/admin`).
-
----
-
-## Características
-
-- 🔄 **Sincronización Viva con tu Portafolio:** Consume tu API (`https://api.mateogs.tech/api`) para obtener siempre tu stack, experiencia, métricas y proyectos reales (La Rúcula, Ynara, etc.) sin hardcodear datos.
-- 🔎 **Multi-Fuente de Vacantes:**
-  - **Get on Board API:** Puestos tech para LATAM y remoto.
-  - **RemoteOK API:** Puestos remotos globales en USD.
-  - **Hacker News ("Who is hiring?"):** Puestos directos en startups y fundadores de EE.UU.
-- 🧠 **Evaluación Semántica con IA (Gemini Flash Lite):**
-  - Scoring de compatibilidad (0–100%).
-  - Filtro duro de exclusión (requisitos incompatibles, on-site estricto en el exterior).
-  - Puntos a favor, puntos en contra y proyectos clave de tu portafolio a destacar.
-- ✉️ **Generador de Pitches Personalizados:** Redacta cover letters y mensajes directos en español o inglés conectando los requisitos de la vacante con tus proyectos reales y el enlace a https://mateogs.tech.
-- 💻 **Centro de Mando Integrado en el Panel Admin:**
-  - Pestaña `job hunter` en la consola técnica de administración (`/admin`).
-  - Filtros rápidos por vacantes de alto match (🔥 ≥ 70%), postuladas y descartadas.
-  - Botón de escaneo en vivo (`[⚡ Escanear Ofertas]`).
-  - Redacción instantánea de pitches con IA (`[⚡ Generar Pitch con IA]`).
-  - Botón directo para copiar la propuesta adaptada al portapapeles.
-  - Estado de postulación (`[✓ Marcar Postulado]` y `[Descartar]`).
-- 🐳 **Listo para VPS y Coolify:** Contenedor Docker multi-stage con FastAPI y SQLite que se conecta transparentemente con la API de Express del portafolio.
+Sistema multiagente autónomo personal para **búsqueda de empleo tech** (remoto USD / LATAM) y **creación de contenido técnico omnicanal** (LinkedIn, X/Twitter, Dev.to, Carousels PDF). Diseñado para operar 100% dentro del nivel gratuito de Google Gemini Free Tier ($0 de coste operativo) y distribuirse mediante **n8n** en tu propio VPS con Coolify.
 
 ---
 
-## Arquitectura de Red
+## 🌟 Módulos y Capacidades
 
-```
-[ Navegador Admin: /admin ]
-         │ (Token Bearer)
-         ▼
-[ Express API :3001 ] ──proxy──▶ [ Eros Agent (FastAPI) :8000 ]
-                                         │
-                   ┌─────────────────────┼─────────────────────┐
-                   ▼                     ▼                     ▼
-             [ SQLite DB ]      [ Gemini 2.5 Flash Lite ]  [ Scrapers: GoB/RemoteOK/HN ]
-```
+### 1. 📱 Content Writer & Omnichannel Engine (`eros.content`)
+- **Generación Omnicanal de Alta Densidad Técnica:** A partir de un tema de ingeniería o un proyecto de tu portafolio, redacta simultáneamente:
+  - **LinkedIn Post:** Hook magnético, contexto del problema, solución técnica con viñetas limpias, métricas reales, CTA de debate y hashtags.
+  - **Primer Comentario:** Enlace contextual a https://mateogs.tech o al repositorio respectivo.
+  - **Hilo de Twitter/X:** Hilo conciso de 3 a 5 tweets (< 275 caracteres cada uno).
+  - **Artículo Técnico para Dev.to:** Markdown completo con encabezados, tags y bloques de código.
+- **5 Pilares Temáticos Configurados:**
+  - `architecture`: Decisiones de diseño (SSR vs SPA, monorrepo, microservicios, edge caching).
+  - `production_lessons`: Bugs reales en producción, incidentes de CORS, políticas CSP (`eval`), hidratación.
+  - `performance_optimization`: Core Web Vitals, Lighthouse 99-100, bundle splitting, optimización de fuentes e imágenes.
+  - `ai_agent_ops`: Arquitecturas de agentes autónomos, LLMs con Gemini Free Tier, prompt engineering y tool calling.
+  - `fullstack_engineering`: TypeScript end-to-end, Vue 3 / Nuxt 3, Node / Express, PostgreSQL.
+
+### 2. 🎠 Carousel Visual Studio (`CarouselRenderer`)
+- **Diapositivas 4:5 (1080 x 1350 px):** Relación de aspecto óptima para el algoritmo de LinkedIn.
+- **Estética Técnica Dark Noir:** Fondo obsidiana (`#07090e`), acentos en esmeralda neón (`#10b981`) y cian eléctrico (`#06b6d4`), tipografía Inter y bloques de código en Fira Code.
+- **Visor Interactivo Web:** Navegación por teclado (flechas ◀ / ▶) y pills interactivos.
+- **Impresión Directa a PDF de LinkedIn:** Incluye reglas CSS `@media print` (`@page { size: 1080px 1350px; margin: 0; }`) para exportar directamente a PDF listo para adjuntar como documento en LinkedIn.
+
+### 3. ⚡ Distribución y Orquestación con n8n (`ContentDispatcher`)
+- **Human-in-the-Loop:** Nada se publica sin aprobación explícita.
+- **Webhook de n8n:** Al aprobar un borrador (desde Telegram o la API), Eros despacha el payload estructurado a n8n, el cual lo publica de forma automatizada en LinkedIn, X/Twitter y Dev.to.
+
+### 4. 🎯 Autonomous Job Hunter & CV Matcher (`eros.hunter`)
+- **Multi-Fuente:** Get on Board, RemoteOK, Hacker News ("Who is hiring?").
+- **Scoring y Match:** Evaluación semántica contra tu perfil y proyectos reales (0–100%).
+- **CV Harvard ATS:** Generación de currículum a medida para la vacante con versión HTML imprimible.
+- **Pitches y Cover Letters:** Redacción instantánea de propuestas adaptadas.
+
+### 5. 🤖 Centro de Control por Telegram (`TelegramBot`)
+- `/post <tema>` — Genera un post omnicanal instantáneo y te envía la vista previa con botones para aprobar o ver el carousel.
+- `/pendientes` — Lista borradores esperando tu visto bueno.
+- `/buscar` — Dispara un escaneo de vacantes en todas las fuentes.
+- `/ofertas` — Muestra las mejores vacantes detectadas.
+- `/status` — Resumen en vivo de vacantes y publicaciones.
+- `/sync` — Sincroniza en tiempo real tu perfil desde `https://api.mateogs.tech/api`.
 
 ---
 
-## Configuración (.env)
+## 📡 Endpoints de la API (FastAPI)
 
-Copia `.env.example` a `.env` y configura tus variables:
-
-```bash
-cp .env.example .env
-```
-
-| Variable | Descripción |
-|---|---|
-| `PORTFOLIO_API_URL` | URL de tu API Express (`https://api.mateogs.tech/api`). |
-| `GEMINI_API_KEY` | API Key de Google Gemini para scoring y redacción. |
-| `MATCH_MIN_SCORE` | Puntaje mínimo (0–100) para clasificar como alto match (default: `75`). |
-| `DATABASE_PATH` | Ruta a la base SQLite (default: `data/eros.db`). |
-| `PORT` | Puerto HTTP para la API de FastAPI (default: `8000`). |
+| Método | Endpoint | Descripción |
+|---|---|---|
+| `POST` | `/api/content/generate` | Genera una publicación omnicanal (LinkedIn + X + Dev.to + 5 slides). |
+| `GET` | `/api/content/posts` | Lista publicaciones (filtro por `status: draft, approved, published`). |
+| `GET` | `/api/content/posts/{id}` | Detalle completo de una publicación. |
+| `PATCH` | `/api/content/posts/{id}/status` | Actualiza estado (`draft`, `approved`, `published`, `rejected`). |
+| `POST` | `/api/content/posts/{id}/publish` | Aprueba y despacha el payload al webhook de n8n. |
+| `GET` | `/api/content/carousel/{id}/html` | Visor HTML interactivo e imprimible del carousel. |
+| `POST` | `/api/webhooks/n8n/callback` | Callback para que n8n confirme la publicación externa. |
+| `GET` | `/api/jobs` | Lista de ofertas laborales escaneadas y evaluadas. |
+| `POST` | `/api/scan` | Dispara escaneo de empleos. |
+| `POST` | `/api/cv/{job_id}` | Genera CV Harvard ATS adaptado para una vacante. |
 
 ---
 
-## Comandos de Uso Local
-
-Con el entorno virtual activado:
+## 💻 Comandos CLI
 
 ```powershell
-# 1. Ejecutar el servidor API de Eros Agent (FastAPI)
-uvicorn eros.api:app --port 8000 --reload
+# 1. Generar contenido omnicanal directamente por CLI:
+python -m eros.main --post "Por qué migramos de React a Nuxt 3 y SSR"
 
-# 2. Sincronizar perfil con la API viva del portafolio
-python -m eros.main --sync
+# 2. Iniciar el servidor API (puerto 8000):
+python -m eros.main --server --port 8000
 
-# 3. Escaneo manual por CLI
+# 3. Iniciar modo demonio (Servidor API + Bot de Telegram en paralelo):
+python -m eros.main --daemon --port 8000
+
+# 4. Escanear vacantes laborales:
 python -m eros.main --scan
 
-# 4. Evaluación manual con IA
+# 5. Evaluar vacantes pendientes con IA:
 python -m eros.main --evaluate
 ```
 
 ---
 
-## Despliegue en el VPS (Coolify)
+## 🐳 Despliegue en VPS (Coolify)
 
-1. Subí este repositorio a GitHub (`MateoGs013/eros-agent`).
-2. En tu panel de Coolify en tu VPS:
-   - Añadí una nueva **Application** desde GitHub.
-   - Seleccioná el repositorio `eros-agent`.
-   - Tipo de Build: **Dockerfile**.
-   - Cargá las variables de entorno (`PORTFOLIO_API_URL`, `GEMINI_API_KEY`, etc.).
-   - Puerto de exposición interna o red Docker: `8000`.
-3. En la configuración de tu contenedor de portafolio Express en Coolify:
-   - Variable `HUNTER_API_URL`: `http://eros-agent:8000` (usando la red interna de Docker en Coolify).
-4. ¡Listo! Todo queda interconectado en tu VPS privado.
+1. Repositorio en GitHub: `MateoGs013/eros-agent`.
+2. En Coolify:
+   - Crear aplicación tipo **Dockerfile**.
+   - Configurar variables de entorno (`GEMINI_API_KEY`, `EROS_API_KEY`, `N8N_WEBHOOK_URL`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALLOWED_USER_ID`, `PORTFOLIO_API_URL`).
+   - Puerto de escucha: `8000`.
+3. Interconexión interna:
+   - Portafolio Express (`HUNTER_API_URL=http://eros-agent:8000`).
+   - n8n (`flow.mateogs.tech`) recibe webhooks desde `eros-agent` y confirma mediante callback.
+

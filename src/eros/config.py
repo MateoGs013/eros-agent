@@ -36,7 +36,11 @@ class Settings(BaseSettings):
 
     # LLM Providers
     gemini_api_key: str = ""
+    gemini_model: str = "gemini-flash-lite-latest"
     anthropic_api_key: str = ""
+
+    # n8n Automation Webhook
+    n8n_webhook_url: str = ""
 
     # Job Hunter thresholds
     match_min_score: int = 75

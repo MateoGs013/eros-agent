@@ -6,6 +6,14 @@ import httpx
 from eros.config import get_settings
 from eros.hunter.engine import HunterEngine
 from eros.models import JobOffer, JobStatus, MatchResult
+from eros.content.models import (
+    ContentGenerateRequest,
+    ContentPostStatus,
+    ContentPillar,
+)
+from eros.content.storage import ContentStorage
+from eros.content.generator import ContentGenerator
+from eros.content.dispatcher import ContentDispatcher
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +24,9 @@ class TelegramBot:
     def __init__(self, engine: HunterEngine | None = None):
         self.settings = get_settings()
         self.engine = engine or HunterEngine()
+        self.content_storage = ContentStorage()
+        self.content_generator = ContentGenerator(storage=self.content_storage, engine=self.engine)
+        self.content_dispatcher = ContentDispatcher(storage=self.content_storage)
         self.token = self.settings.telegram_bot_token
         self.base_url = f"https://api.telegram.org/bot{self.token}"
         self.allowed_user_id = self.settings.telegram_allowed_user_id
@@ -157,30 +168,91 @@ class TelegramBot:
             await self._handle_callback(cb_id, chat_id, data)
 
     async def _handle_command(self, chat_id: int | str, text: str, user_id: int) -> None:
-        """Maneja comandos como /start, /buscar, /status, /ofertas."""
-        cmd = text.split()[0].lower() if text else ""
+        """Maneja comandos como /start, /post, /pendientes, /buscar, /status, /ofertas."""
+        parts = text.split(maxsplit=1) if text else [""]
+        cmd = parts[0].lower()
+        args = parts[1].strip() if len(parts) > 1 else ""
 
         if cmd in ["/start", "/ayuda"]:
             welcome = (
-                "👋 <b>Hola Mateo, soy Eros Agent.</b>\n\n"
-                "Estoy monitoreando activamente ofertas laborales conectadas con tu portafolio en <code>api.mateogs.tech</code>.\n\n"
-                "<b>Comandos disponibles:</b>\n"
+                "👋 <b>Hola Mateo, soy Eros Career OS & Hunter Agent.</b>\n\n"
+                "Monitoreo ofertas tech compatibles y genero publicaciones técnicas omnicanal conectadas con tu portafolio.\n\n"
+                "<b>📱 Generación de Contenido & Marca:</b>\n"
+                "• <code>/post &lt;tema&gt;</code> — Generar post omnicanal (LinkedIn, X, Dev.to y Carousel de 5 slides).\n"
+                "• <code>/pendientes</code> — Ver borradores pendientes de aprobación para n8n.\n\n"
+                "<b>🎯 Búsqueda Laboral (Hunter):</b>\n"
                 "• <code>/buscar</code> — Escanear ofertas ahora en todas las fuentes.\n"
-                "• <code>/ofertas</code> — Ver las mejores vacantes detectadas.\n"
-                "• <code>/status</code> — Resumen de base de datos y estado.\n"
+                "• <code>/ofertas</code> — Ver las mejores vacantes detectadas (≥ 75%).\n"
+                "• <code>/status</code> — Resumen del sistema y base de datos.\n"
                 "• <code>/perfil</code> — Ver datos sincronizados de tu portafolio.\n"
-                "• <code>/sync</code> — Forzar actualización de tu CV y proyectos desde la API."
+                "• <code>/sync</code> — Forzar actualización de tu CV y proyectos desde mateogs.tech."
             )
             await self.send_message(chat_id, welcome)
+
+        elif cmd == "/post":
+            topic = args or "Optimización de arquitectura frontend y rendimiento web con Nuxt 3 y TypeScript"
+            await self.send_message(chat_id, f"✍️ <i>Generando contenido técnico con Gemini 2.5 Flash sobre:</i>\n<b>'{topic}'</b>...")
+
+            try:
+                post = await self.content_generator.generate_post(ContentGenerateRequest(topic=topic))
+                carousel_url = f"https://eros.mateogs.tech/api/content/carousel/{post.id}/html"
+
+                summary = (
+                    f"📝 <b>NUEVO POST GENERADO (Borrador)</b>\n\n"
+                    f"📌 <b>Título:</b> {post.title}\n"
+                    f"🎯 <b>Pilar:</b> {post.pillar.value}\n"
+                    f"🧵 <b>Tweets:</b> {len(post.twitter_thread)} tweets preparados\n"
+                    f"🎠 <b>Slides:</b> {len(post.carousel_slides)} diapositivas listas\n\n"
+                    f"<b>Hook LinkedIn:</b>\n<i>{post.hook}</i>\n\n"
+                    f"<b>Primer comentario:</b>\n<code>{post.first_comment}</code>"
+                )
+
+                buttons = [
+                    [
+                        {"text": "🚀 Aprobar y Despachar a n8n", "callback_data": f"pub_post:{post.id}"},
+                    ],
+                    [
+                        {"text": "🎠 Ver Carousel Web", "url": carousel_url},
+                        {"text": "🗑️ Descartar", "callback_data": f"del_post:{post.id}"}
+                    ]
+                ]
+
+                await self.send_message(chat_id, summary, reply_markup={"inline_keyboard": buttons})
+            except Exception as e:
+                logger.error(f"Error generando post en Telegram: {e}")
+                await self.send_message(chat_id, f"❌ Error generando post: {str(e)}")
+
+        elif cmd == "/pendientes":
+            drafts = await self.content_storage.list_posts(status=ContentPostStatus.DRAFT, limit=5)
+            if not drafts:
+                await self.send_message(chat_id, "No hay borradores de contenido pendientes. Podés crear uno con <code>/post &lt;tema&gt;</code>.")
+                return
+
+            await self.send_message(chat_id, f"📋 <b>Top {len(drafts)} publicaciones en borrador pendientes:</b>")
+            for post in drafts:
+                carousel_url = f"https://eros.mateogs.tech/api/content/carousel/{post.id}/html"
+                buttons = [
+                    [
+                        {"text": "🚀 Aprobar n8n", "callback_data": f"pub_post:{post.id}"},
+                        {"text": "🎠 Ver Carousel", "url": carousel_url},
+                        {"text": "🗑️", "callback_data": f"del_post:{post.id}"}
+                    ]
+                ]
+                card = f"📌 <b>{post.title}</b> ({post.pillar.value})\n<i>{post.hook[:120]}...</i>"
+                await self.send_message(chat_id, card, reply_markup={"inline_keyboard": buttons})
 
         elif cmd == "/status":
             unseen = await self.engine.storage.list_unseen_jobs()
             matched = await self.engine.storage.list_matched_jobs(min_score=70)
+            drafts = await self.content_storage.list_posts(status=ContentPostStatus.DRAFT)
+            published = await self.content_storage.list_posts(status=ContentPostStatus.PUBLISHED)
             status_text = (
                 "📊 <b>ESTADO DE EROS AGENT</b>\n\n"
-                f"• <b>Vacantes pendientes de evaluar:</b> {len(unseen)}\n"
+                f"• <b>Vacantes pendientes:</b> {len(unseen)}\n"
                 f"• <b>Vacantes con match ≥ 70%:</b> {len(matched)}\n"
-                f"• <b>Fuentes activas:</b> Get on Board, RemoteOK, Hacker News\n"
+                f"• <b>Posts en borrador:</b> {len(drafts)}\n"
+                f"• <b>Posts publicados:</b> {len(published)}\n"
+                f"• <b>n8n Webhook:</b> {'Configurado' if self.settings.n8n_webhook_url else 'Pendiente'}\n"
                 f"• <b>Tu User ID:</b> <code>{user_id}</code>\n"
             )
             await self.send_message(chat_id, status_text)
@@ -243,7 +315,7 @@ class TelegramBot:
                 await self.send_message(chat_id, card, reply_markup={"inline_keyboard": buttons})
 
     async def _handle_callback(self, cb_id: str, chat_id: int | str, data: str) -> None:
-        """Maneja clics en botones inline como 'pitch:<id>' o 'discard:<id>'."""
+        """Maneja clics en botones inline como 'pitch:<id>', 'discard:<id>', 'pub_post:<id>'."""
         # Responder a Telegram para apagar el reloj de carga en el botón
         async with httpx.AsyncClient(timeout=5.0) as client:
             try:
@@ -251,7 +323,22 @@ class TelegramBot:
             except Exception:
                 pass
 
-        if data.startswith("pitch:"):
+        if data.startswith("pub_post:"):
+            post_id = data.split("pub_post:")[1]
+            await self.send_message(chat_id, f"🚀 <i>Procesando aprobación y despacho para la publicación {post_id}...</i>")
+            res = await self.content_dispatcher.publish_post(post_id)
+            if res.get("ok"):
+                status_note = "Enviado a n8n para distribución automática." if res.get("status") == "published" else res.get("message")
+                await self.send_message(chat_id, f"✅ <b>Publicación aprobada exitosamente!</b>\n{status_note}")
+            else:
+                await self.send_message(chat_id, f"⚠️ Error en despacho: {res.get('error')}")
+
+        elif data.startswith("del_post:"):
+            post_id = data.split("del_post:")[1]
+            await self.content_storage.update_status(post_id, ContentPostStatus.REJECTED)
+            await self.send_message(chat_id, f"🗑️ Publicación {post_id} descartada.")
+
+        elif data.startswith("pitch:"):
             job_id = data.split("pitch:")[1]
             await self.send_message(chat_id, "✍️ <i>Generando pitch a medida con tus proyectos y métricas...</i>")
             pitch = await self.engine.generate_pitch_for_job(job_id)

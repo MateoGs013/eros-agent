@@ -12,7 +12,15 @@ class LLMClient:
     def __init__(self):
         self.settings = get_settings()
 
-    async def generate(self, prompt: str, system_prompt: str | None = None, prefer_model: str = "gemini") -> str:
+    async def generate(
+        self,
+        prompt: str,
+        system_prompt: str | None = None,
+        prefer_model: str = "gemini",
+        temperature: float = 0.3,
+        json_mode: bool = False,
+        max_tokens: int = 4096,
+    ) -> str:
         """Genera una respuesta utilizando el proveedor configurado."""
         if prefer_model == "claude" and self.settings.anthropic_api_key:
             try:
@@ -22,16 +30,31 @@ class LLMClient:
 
         if self.settings.gemini_api_key:
             try:
-                return await self._call_gemini(prompt, system_prompt)
+                return await self._call_gemini(
+                    prompt,
+                    system_prompt,
+                    temperature=temperature,
+                    json_mode=json_mode,
+                    max_tokens=max_tokens,
+                )
             except Exception as e:
                 logger.error(f"Falla en Gemini ({e}). Usando evaluador heurístico.")
 
         # Si aún no tiene API keys configuradas o falló la API, usamos un análisis heurístico inteligente como fallback
         return self._heuristic_fallback(prompt)
 
-    async def _call_gemini(self, prompt: str, system_prompt: str | None = None, model: str = "gemini-flash-lite-latest") -> str:
+    async def _call_gemini(
+        self,
+        prompt: str,
+        system_prompt: str | None = None,
+        model: str | None = None,
+        temperature: float = 0.3,
+        max_tokens: int = 4096,
+        json_mode: bool = False,
+    ) -> str:
         """Llama a la API de Google Gemini vía REST."""
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={self.settings.gemini_api_key}"
+        active_model = model or getattr(self.settings, "gemini_model", "gemini-flash-lite-latest")
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{active_model}:generateContent?key={self.settings.gemini_api_key}"
         
         contents = []
         if system_prompt:
@@ -49,12 +72,16 @@ class LLMClient:
             "parts": [{"text": prompt}]
         })
 
+        gen_config: dict[str, Any] = {
+            "temperature": temperature,
+            "maxOutputTokens": max_tokens,
+        }
+        if json_mode:
+            gen_config["responseMimeType"] = "application/json"
+
         payload = {
             "contents": contents,
-            "generationConfig": {
-                "temperature": 0.2,
-                "maxOutputTokens": 2048,
-            }
+            "generationConfig": gen_config,
         }
 
         async with httpx.AsyncClient(timeout=30.0) as client:
