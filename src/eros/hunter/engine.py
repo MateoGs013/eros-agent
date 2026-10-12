@@ -285,6 +285,16 @@ class HunterEngine:
             if (not job.salary or not job.salary.strip()) and match.salary_estimate:
                 job.salary = match.salary_estimate
 
+            # Persistir detective de hiring manager y nota de conexión LinkedIn
+            if match.recruiter_note:
+                job.connection_note = match.recruiter_note
+            if match.hiring_manager_name and not job.hiring_manager_name:
+                job.hiring_manager_name = match.hiring_manager_name
+            if match.hiring_manager_title and not job.hiring_manager_title:
+                job.hiring_manager_title = match.hiring_manager_title
+            if match.hiring_manager_url and not job.hiring_manager_url:
+                job.hiring_manager_url = match.hiring_manager_url
+
             # Si el modelo determinó DESCARTAR o incompatibilidad legal/geográfica
             if match.score <= 35 or match.verdict == "DESCARTAR":
                 job.status = JobStatus.DISCARDED
@@ -317,6 +327,16 @@ class HunterEngine:
         job.match_analysis = json.dumps(match.model_dump())
         if (not job.salary or not job.salary.strip()) and match.salary_estimate:
             job.salary = match.salary_estimate
+
+        # Persistir detective de hiring manager y nota de conexión LinkedIn
+        if match.recruiter_note:
+            job.connection_note = match.recruiter_note
+        if match.hiring_manager_name and not job.hiring_manager_name:
+            job.hiring_manager_name = match.hiring_manager_name
+        if match.hiring_manager_title and not job.hiring_manager_title:
+            job.hiring_manager_title = match.hiring_manager_title
+        if match.hiring_manager_url and not job.hiring_manager_url:
+            job.hiring_manager_url = match.hiring_manager_url
 
         if match.score <= 35 or match.verdict == "DESCARTAR":
             job.status = JobStatus.DISCARDED

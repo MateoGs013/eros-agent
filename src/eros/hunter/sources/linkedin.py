@@ -97,7 +97,10 @@ class LinkedInJobsSource(BaseJobSource):
                         clean_url = f"https://www.linkedin.com/jobs/view/{job_id_ext}"
 
                         # Intentar obtener la descripción completa desde la API pública de detalle
-                        description = f"Puesto: {title}\nEmpresa: {company}\nUbicación: {location}\nModalidad: Remoto\nEnlace: {clean_url}"
+                        hiring_name = None
+                        hiring_title = None
+                        hiring_url = None
+
                         try:
                             await asyncio.sleep(0.4)  # Cortesía para evitar 429
                             desc_url = f"https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/{job_id_ext}"
@@ -109,6 +112,8 @@ class LinkedInJobsSource(BaseJobSource):
                                     clean_text = desc_div.get_text(separator="\n", strip=True)
                                     if len(clean_text) > 50:
                                         description = clean_text
+
+                                hiring_name, hiring_title, hiring_url = self.extract_hiring_manager(d_soup)
                         except Exception as e:
                             logger.debug(f"No se pudo descargar descripción extendida de LinkedIn {job_id_ext}: {e}")
 
@@ -144,6 +149,9 @@ class LinkedInJobsSource(BaseJobSource):
                             country=location,
                             is_remote=is_remote,
                             published_at=published_at,
+                            hiring_manager_name=hiring_name,
+                            hiring_manager_title=hiring_title,
+                            hiring_manager_url=hiring_url,
                         )
                         offers.append(offer)
 
@@ -152,3 +160,49 @@ class LinkedInJobsSource(BaseJobSource):
 
         logger.info(f"LinkedIn Jobs: se obtuvieron {len(offers)} ofertas calificadas para LATAM.")
         return offers
+
+    @staticmethod
+    def extract_hiring_manager(soup: BeautifulSoup) -> tuple[str | None, str | None, str | None]:
+        """Detecta la persona o recruiter a cargo de la vacante en la ficha pública de LinkedIn."""
+        name = None
+        title = None
+        profile_url = None
+
+        # 1. Contenedores estándar de reclutador en LinkedIn ('message-the-recruiter', 'hirer-card', 'job-poster')
+        recruiter_box = soup.find(
+            lambda t: t.name in ["div", "section", "article"]
+            and any(k in " ".join(t.get("class") or []) for k in ["message-the-recruiter", "hirer-card", "job-poster", "recruiter"])
+        )
+        if recruiter_box:
+            link = recruiter_box.find("a", href=lambda h: h and "/in/" in h)
+            if link and link.get("href"):
+                raw_href = link["href"].split("?")[0].strip()
+                if "/in/" in raw_href:
+                    profile_url = raw_href
+
+            name_el = recruiter_box.find(
+                lambda t: t.name in ["h3", "h4", "strong", "span", "div"]
+                and any(k in " ".join(t.get("class") or []) for k in ["title", "name", "hirer"])
+            )
+            if name_el:
+                name = name_el.get_text(strip=True)
+            elif link and link.get_text(strip=True):
+                name = link.get_text(strip=True)
+
+            sub_el = recruiter_box.find(
+                lambda t: t.name in ["h4", "h5", "p", "span", "div"]
+                and any(k in " ".join(t.get("class") or []) for k in ["subtitle", "headline", "role", "occupation"])
+            )
+            if sub_el and sub_el.get_text(strip=True) != name:
+                title = sub_el.get_text(strip=True)
+
+        # 2. Si no se encontró en contenedor específico, buscar cualquier enlace a perfil /in/
+        if not profile_url:
+            link = soup.find("a", href=lambda h: h and "/in/" in h)
+            if link and link.get("href"):
+                profile_url = link["href"].split("?")[0].strip()
+                link_text = link.get_text(strip=True)
+                if link_text and 3 < len(link_text) < 50:
+                    name = link_text
+
+        return name, title, profile_url

@@ -48,9 +48,11 @@ CRITERIOS ESTRICTOS DE EVALUACIÓN:
    - Frontend Engineer / Creative Developer moderno (Vue/Nuxt, React, TS): Coincidencia ALTA (80-92%).
    - Stacks no compatibles (WordPress, PHP legado, Drupal, Magento, Java EE clásico, C# desktop, Cobol): Asignar score <= 35, verdict: "DESCARTAR".
 
-4. COMPENSACIÓN Y ESTIMACIÓN DE SALARIO:
-   - Si la oferta especifica un salario publicado (ej: USD 3,000 - 4,500 o USD 80k/yr), validalo y devuélvelo en "salary_estimate" (ej: "USD 3,000 - 4,500 / mes").
-   - Si la oferta NO especifica salario, estimá un rango de mercado competitivo y realista para el rol, seniority y modalidad (ej: "USD 2,500 - 4,000 / mes" para remoto LATAM/Global, o "ARS 1.8M - 2.8M / mes" si es local en Argentina).
+5. DETECTIVE DE HIRING MANAGER Y NOTA DE CONEXIÓN DE LINKEDIN (< 300 CARACTERES):
+   - Si se menciona en la oferta o metadatos la persona a cargo, extraé "hiring_manager_name" y "hiring_manager_title".
+   - Redactá SIEMPRE en "recruiter_note" una nota de conexión para LinkedIn ultra-personalizada de MENOS DE 280 CARACTERES (límite estricto de invitación con nota en LinkedIn).
+   - REGLA ESTRICTA DE LA NOTA: CERO EMOJIS. No uses emojis bajo ninguna circunstancia.
+   - Debe ser directa, profesional y citar el stack clave (Vue 3, Nuxt, Node, TypeScript) y el enlace mateogs.tech.
 
 Debes responder ÚNICAMENTE un objeto JSON válido con este formato:
 {
@@ -61,7 +63,10 @@ Debes responder ÚNICAMENTE un objeto JSON válido con este formato:
   "cons": ["<punto en contra o duda 1>"],
   "missing_skills": ["<habilidad o tecnología requerida que Mateo no tiene>"],
   "matching_projects": ["<Nombre de proyectos de Mateo que encajan perfecto con la búsqueda>"],
-  "salary_estimate": "<Rango salarial estimado o publicado, ej: 'USD 2,500 - 4,000 / mes' o 'USD 50k - 75k / año'>"
+  "salary_estimate": "<Rango salarial estimado o publicado, ej: 'USD 2,500 - 4,000 / mes' o 'USD 50k - 75k / año'>",
+  "hiring_manager_name": "<Nombre del recruiter o lead si se menciona, o null>",
+  "hiring_manager_title": "<Rol o título de la persona si se menciona, o null>",
+  "recruiter_note": "<Nota de conexión de LinkedIn personalizada de menos de 280 caracteres sin emojis>"
 }
 """
 
@@ -104,6 +109,19 @@ Devolve exclusivamente el JSON de evaluación.
                 clean_json = json_match.group(0)
 
             data = json.loads(clean_json)
+
+            recruiter_note = data.get("recruiter_note")
+            hiring_name = data.get("hiring_manager_name") or job.hiring_manager_name
+            hiring_title = data.get("hiring_manager_title") or job.hiring_manager_title
+            hiring_url = job.hiring_manager_url
+
+            if not recruiter_note or not recruiter_note.strip():
+                greeting = f"Hola {hiring_name.split()[0]}, " if hiring_name else "Hola, "
+                recruiter_note = f"{greeting}vi la búsqueda de {job.title} en {job.company}. Me especializo en Vue/Nuxt, Node y TypeScript. Portafolio: mateogs.tech. Me gustaría conectar!"
+
+            if len(recruiter_note) > 280:
+                recruiter_note = recruiter_note[:277] + "..."
+
             return MatchResult(
                 score=int(data.get("score", 50)),
                 verdict=data.get("verdict", "REGULAR"),
@@ -112,10 +130,20 @@ Devolve exclusivamente el JSON de evaluación.
                 cons=data.get("cons", []),
                 missing_skills=data.get("missing_skills", []),
                 matching_projects=data.get("matching_projects", []),
-                salary_estimate=data.get("salary_estimate")
+                salary_estimate=data.get("salary_estimate"),
+                recruiter_note=recruiter_note,
+                hiring_manager_name=hiring_name,
+                hiring_manager_title=hiring_title,
+                hiring_manager_url=hiring_url,
             )
         except Exception as e:
             logger.error(f"Error evaluando oferta '{job.title}': {e}. Usando fallback.")
+            hiring_name = job.hiring_manager_name
+            greeting = f"Hola {hiring_name.split()[0]}, " if hiring_name else "Hola, "
+            fallback_note = f"{greeting}vi la búsqueda de {job.title} en {job.company}. Me especializo en Vue/Nuxt, Node y TypeScript. Portafolio: mateogs.tech. Me gustaría conectar!"
+            if len(fallback_note) > 280:
+                fallback_note = fallback_note[:277] + "..."
+
             return MatchResult(
                 score=65,
                 verdict="REGULAR",
@@ -124,5 +152,9 @@ Devolve exclusivamente el JSON de evaluación.
                 cons=["Se requiere revisión manual"],
                 missing_skills=[],
                 matching_projects=["Portafolio Dos Mundos"],
-                salary_estimate=None
+                salary_estimate=None,
+                recruiter_note=fallback_note,
+                hiring_manager_name=hiring_name,
+                hiring_manager_title=job.hiring_manager_title,
+                hiring_manager_url=job.hiring_manager_url,
             )

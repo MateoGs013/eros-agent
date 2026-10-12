@@ -59,6 +59,18 @@ class JobStorage:
             except Exception:
                 pass
 
+            # Migraciones para Detective de Hiring Manager & Nota de Conexión
+            for col in [
+                "hiring_manager_name TEXT",
+                "hiring_manager_title TEXT",
+                "hiring_manager_url TEXT",
+                "connection_note TEXT"
+            ]:
+                try:
+                    await db.execute(f"ALTER TABLE jobs ADD COLUMN {col}")
+                except Exception:
+                    pass
+
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS vector_cache (
                     key TEXT PRIMARY KEY,
@@ -102,24 +114,33 @@ class JobStorage:
                         id, source, external_id, title, company, url, description,
                         tags, salary, country, is_remote, published_at, found_at,
                         status, match_score, match_analysis, pitch_draft, tailored_cv,
-                        semantic_score, embedding
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        semantic_score, embedding, hiring_manager_name, hiring_manager_title,
+                        hiring_manager_url, connection_note
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     job.id, job.source, job.external_id, job.title, job.company, job.url,
                     job.description, tags_json, job.salary, job.country,
                     1 if job.is_remote else 0, job.published_at, job.found_at,
                     job.status.value, job.match_score, job.match_analysis, job.pitch_draft,
-                    job.tailored_cv, job.semantic_score, embedding_json
+                    job.tailored_cv, job.semantic_score, embedding_json,
+                    job.hiring_manager_name, job.hiring_manager_title,
+                    job.hiring_manager_url, job.connection_note
                 ))
             else:
                 await db.execute("""
                     UPDATE jobs SET
                         status = ?, match_score = ?, match_analysis = ?, pitch_draft = ?,
-                        tailored_cv = ?, salary = ?, semantic_score = ?, embedding = ?
+                        tailored_cv = ?, salary = ?, semantic_score = ?, embedding = ?,
+                        hiring_manager_name = COALESCE(?, hiring_manager_name),
+                        hiring_manager_title = COALESCE(?, hiring_manager_title),
+                        hiring_manager_url = COALESCE(?, hiring_manager_url),
+                        connection_note = COALESCE(?, connection_note)
                     WHERE id = ?
                 """, (
                     job.status.value, job.match_score, job.match_analysis, job.pitch_draft,
-                    job.tailored_cv, job.salary, job.semantic_score, embedding_json, job.id
+                    job.tailored_cv, job.salary, job.semantic_score, embedding_json,
+                    job.hiring_manager_name, job.hiring_manager_title,
+                    job.hiring_manager_url, job.connection_note, job.id
                 ))
 
             await db.commit()
@@ -260,6 +281,11 @@ class JobStorage:
             except Exception:
                 pass
 
+        hiring_manager_name = row["hiring_manager_name"] if "hiring_manager_name" in keys else None
+        hiring_manager_title = row["hiring_manager_title"] if "hiring_manager_title" in keys else None
+        hiring_manager_url = row["hiring_manager_url"] if "hiring_manager_url" in keys else None
+        connection_note = row["connection_note"] if "connection_note" in keys else None
+
         return JobOffer(
             id=row["id"],
             source=row["source"],
@@ -281,6 +307,10 @@ class JobStorage:
             tailored_cv=tailored_cv,
             semantic_score=semantic_score,
             embedding=embedding,
+            hiring_manager_name=hiring_manager_name,
+            hiring_manager_title=hiring_manager_title,
+            hiring_manager_url=hiring_manager_url,
+            connection_note=connection_note,
         )
 
     async def update_job_embedding(self, job_id: str, embedding: list[float], semantic_score: int) -> None:

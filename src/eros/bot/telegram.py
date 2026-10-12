@@ -77,26 +77,46 @@ class TelegramBot:
         badge = "[MATCH ALTO]" if match.score >= 85 else "[MATCH]"
         salary_text = f"\n• <b>Salario:</b> {job.salary}" if job.salary else ""
         country_text = f"\n• <b>Ubicación:</b> {job.country}" if job.country else ""
-        
+
+        recruiter_text = ""
+        hiring_name = job.hiring_manager_name or match.hiring_manager_name
+        hiring_title = job.hiring_manager_title or match.hiring_manager_title
+        if hiring_name:
+            recruiter_text = f"\n• <b>Hiring Lead:</b> {hiring_name}"
+            if hiring_title:
+                recruiter_text += f" ({hiring_title})"
+
         pros_text = ""
         if match.pros:
             pros_text = "\n\n<b>Puntos destacados:</b>\n" + "\n".join([f"• {p}" for p in match.pros[:3]])
+
+        connection_note = job.connection_note or match.recruiter_note
+        note_text = ""
+        if connection_note:
+            note_text = f"\n\n<b>Nota de conexión LinkedIn (&lt; 280 car.):</b>\n<code>{connection_note}</code>"
 
         msg = (
             f"<b>{badge} NUEVA VACANTE COMPATIBLE ({match.score}%)</b>\n\n"
             f"<b>Puesto:</b> {job.title}\n"
             f"<b>Empresa:</b> {job.company} ({job.source.upper()})"
             f"{country_text}"
-            f"{salary_text}\n\n"
+            f"{salary_text}"
+            f"{recruiter_text}\n\n"
             f"<b>Análisis:</b> {match.summary}"
             f"{pros_text}"
+            f"{note_text}"
         )
 
+        first_row = [
+            {"text": "Generar Pitch", "callback_data": f"pitch:{job.id}"},
+            {"text": "Ver Oferta", "url": job.url}
+        ]
+        hiring_url = job.hiring_manager_url or match.hiring_manager_url
+        if hiring_url:
+            first_row.append({"text": "Ver Recruiter", "url": hiring_url})
+
         buttons = [
-            [
-                {"text": "Generar Pitch", "callback_data": f"pitch:{job.id}"},
-                {"text": "Ver Oferta", "url": job.url}
-            ],
+            first_row,
             [
                 {"text": "Descartar", "callback_data": f"discard:{job.id}"}
             ]
@@ -304,14 +324,29 @@ class TelegramBot:
 
             await self.send_message(chat_id, f"<b>Top {len(matched)} ofertas más compatibles:</b>")
             for job in matched:
-                buttons = [
-                    [
-                        {"text": "Pitch", "callback_data": f"pitch:{job.id}"},
-                        {"text": "Ver Oferta", "url": job.url},
-                        {"text": "Descartar", "callback_data": f"discard:{job.id}"}
-                    ]
+                first_row = [
+                    {"text": "Pitch", "callback_data": f"pitch:{job.id}"},
+                    {"text": "Ver Oferta", "url": job.url}
                 ]
-                card = f"• <b>Match {job.match_score}%</b>: {job.title} en <b>{job.company}</b> ({job.source.upper()})"
+                if job.hiring_manager_url:
+                    first_row.append({"text": "Recruiter", "url": job.hiring_manager_url})
+
+                buttons = [
+                    first_row,
+                    [{"text": "Descartar", "callback_data": f"discard:{job.id}"}]
+                ]
+
+                recruiter_line = ""
+                if job.hiring_manager_name:
+                    recruiter_line = f"\n• <b>Lead:</b> {job.hiring_manager_name}"
+                    if job.hiring_manager_title:
+                        recruiter_line += f" ({job.hiring_manager_title})"
+
+                note_line = ""
+                if job.connection_note:
+                    note_line = f"\n• <b>Nota de Conexión:</b>\n<code>{job.connection_note}</code>"
+
+                card = f"• <b>Match {job.match_score}%</b>: {job.title} en <b>{job.company}</b> ({job.source.upper()}){recruiter_line}{note_line}"
                 await self.send_message(chat_id, card, reply_markup={"inline_keyboard": buttons})
 
     async def _handle_callback(self, cb_id: str, chat_id: int | str, data: str) -> None:

@@ -16,11 +16,11 @@ class JobOffer(BaseModel):
     """Modelo normalizado para vacantes de cualquier fuente."""
     id: str  # Hash único basado en source + external_id o url
     source: str  # 'getonboard', 'remoteok', 'hackernews', etc.
-    external_id: str
+    external_id: str = ""
     title: str
     company: str
     url: str
-    description: str
+    description: str = ""
     tags: list[str] = Field(default_factory=list)
     salary: str | None = None
     country: str | None = None
@@ -36,6 +36,12 @@ class JobOffer(BaseModel):
     tailored_cv: str | None = None
     semantic_score: int | None = None
     embedding: list[float] | None = None
+
+    # Detective de Hiring Manager & Nota de Conexión LinkedIn
+    hiring_manager_name: str | None = None
+    hiring_manager_title: str | None = None
+    hiring_manager_url: str | None = None
+    connection_note: str | None = None
 
 
 class CVProject(BaseModel):
@@ -81,6 +87,10 @@ class MatchResult(BaseModel):
     missing_skills: list[str] = Field(default_factory=list)
     matching_projects: list[str] = Field(default_factory=list)
     salary_estimate: str | None = None
+    recruiter_note: str | None = None
+    hiring_manager_name: str | None = None
+    hiring_manager_title: str | None = None
+    hiring_manager_url: str | None = None
 
 
 class PitchDraft(BaseModel):
