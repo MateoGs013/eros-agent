@@ -74,31 +74,31 @@ class TelegramBot:
             logger.info(f"Nuevo match ({match.score}%): {job.title} en {job.company} (sin TELEGRAM_ALLOWED_USER_ID para notificar).")
             return False
 
-        emoji_verdict = "🔥" if match.score >= 85 else "🎯"
-        salary_text = f"\n💰 <b>Salario:</b> {job.salary}" if job.salary else ""
-        country_text = f"\n🌍 <b>Ubicación:</b> {job.country}" if job.country else ""
+        badge = "[MATCH ALTO]" if match.score >= 85 else "[MATCH]"
+        salary_text = f"\n• <b>Salario:</b> {job.salary}" if job.salary else ""
+        country_text = f"\n• <b>Ubicación:</b> {job.country}" if job.country else ""
         
         pros_text = ""
         if match.pros:
             pros_text = "\n\n<b>Puntos destacados:</b>\n" + "\n".join([f"• {p}" for p in match.pros[:3]])
 
         msg = (
-            f"{emoji_verdict} <b>NUEVA VACANTE COMPATIBLE ({match.score}%)</b>\n\n"
-            f"💼 <b>{job.title}</b>\n"
-            f"🏢 <b>{job.company}</b> ({job.source.upper()})"
+            f"<b>{badge} NUEVA VACANTE COMPATIBLE ({match.score}%)</b>\n\n"
+            f"<b>Puesto:</b> {job.title}\n"
+            f"<b>Empresa:</b> {job.company} ({job.source.upper()})"
             f"{country_text}"
             f"{salary_text}\n\n"
-            f"📝 <b>Análisis:</b> {match.summary}"
+            f"<b>Análisis:</b> {match.summary}"
             f"{pros_text}"
         )
 
         buttons = [
             [
-                {"text": "✉️ Generar Pitch / Carta", "callback_data": f"pitch:{job.id}"},
-                {"text": "🔗 Ver Oferta", "url": job.url}
+                {"text": "Generar Pitch", "callback_data": f"pitch:{job.id}"},
+                {"text": "Ver Oferta", "url": job.url}
             ],
             [
-                {"text": "❌ Descartar", "callback_data": f"discard:{job.id}"}
+                {"text": "Descartar", "callback_data": f"discard:{job.id}"}
             ]
         ]
         keyboard = {"inline_keyboard": buttons}
@@ -175,52 +175,52 @@ class TelegramBot:
 
         if cmd in ["/start", "/ayuda"]:
             welcome = (
-                "👋 <b>Hola Mateo, soy Eros Career OS & Hunter Agent.</b>\n\n"
-                "Monitoreo ofertas tech compatibles y genero publicaciones técnicas omnicanal conectadas con tu portafolio.\n\n"
-                "<b>📱 Generación de Contenido & Marca:</b>\n"
-                "• <code>/post &lt;tema&gt;</code> — Generar post omnicanal (LinkedIn, X, Dev.to y Carousel de 5 slides).\n"
-                "• <code>/pendientes</code> — Ver borradores pendientes de aprobación para n8n.\n\n"
-                "<b>🎯 Búsqueda Laboral (Hunter):</b>\n"
-                "• <code>/buscar</code> — Escanear ofertas ahora en todas las fuentes.\n"
-                "• <code>/ofertas</code> — Ver las mejores vacantes detectadas (≥ 75%).\n"
-                "• <code>/status</code> — Resumen del sistema y base de datos.\n"
-                "• <code>/perfil</code> — Ver datos sincronizados de tu portafolio.\n"
-                "• <code>/sync</code> — Forzar actualización de tu CV y proyectos desde mateogs.tech."
+                "<b>[EROS CAREER OS] Panel de Control</b>\n\n"
+                "Monitoreo de ofertas tech compatibles y generador de contenido técnico omnicanal.\n\n"
+                "<b>Contenido y Marca:</b>\n"
+                "• <code>/post &lt;tema&gt;</code> &rarr; Generar post omnicanal (LinkedIn, X, Dev.to y Carousel 5 slides).\n"
+                "• <code>/pendientes</code> &rarr; Ver borradores pendientes de aprobación para n8n.\n\n"
+                "<b>Búsqueda Laboral (Hunter):</b>\n"
+                "• <code>/buscar</code> &rarr; Escanear ofertas ahora en todas las fuentes.\n"
+                "• <code>/ofertas</code> &rarr; Ver mejores vacantes detectadas (&ge; 75%).\n"
+                "• <code>/status</code> &rarr; Resumen del sistema y base de datos.\n"
+                "• <code>/perfil</code> &rarr; Ver datos sincronizados de tu portafolio.\n"
+                "• <code>/sync</code> &rarr; Forzar actualización desde mateogs.tech."
             )
             await self.send_message(chat_id, welcome)
 
         elif cmd == "/post":
             topic = args or "Optimización de arquitectura frontend y rendimiento web con Nuxt 3 y TypeScript"
-            await self.send_message(chat_id, f"✍️ <i>Generando contenido técnico con Gemini 2.5 Flash sobre:</i>\n<b>'{topic}'</b>...")
+            await self.send_message(chat_id, f"<i>[GENERANDO] Procesando contenido técnico sobre:</i>\n<b>'{topic}'</b>...")
 
             try:
                 post = await self.content_generator.generate_post(ContentGenerateRequest(topic=topic))
                 carousel_url = f"https://eros.mateogs.tech/api/content/carousel/{post.id}/html"
 
                 summary = (
-                    f"📝 <b>NUEVO POST GENERADO (Borrador)</b>\n\n"
-                    f"📌 <b>Título:</b> {post.title}\n"
-                    f"🎯 <b>Pilar:</b> {post.pillar.value}\n"
-                    f"🧵 <b>Tweets:</b> {len(post.twitter_thread)} tweets preparados\n"
-                    f"🎠 <b>Slides:</b> {len(post.carousel_slides)} diapositivas listas\n\n"
+                    f"<b>[NUEVO POST GENERADO] (Borrador)</b>\n\n"
+                    f"• <b>Título:</b> {post.title}\n"
+                    f"• <b>Pilar:</b> {post.pillar.value}\n"
+                    f"• <b>Tweets:</b> {len(post.twitter_thread)} tweets preparados\n"
+                    f"• <b>Slides:</b> {len(post.carousel_slides)} diapositivas listas\n\n"
                     f"<b>Hook LinkedIn:</b>\n<i>{post.hook}</i>\n\n"
                     f"<b>Primer comentario:</b>\n<code>{post.first_comment}</code>"
                 )
 
                 buttons = [
                     [
-                        {"text": "🚀 Aprobar y Despachar a n8n", "callback_data": f"pub_post:{post.id}"},
+                        {"text": "Aprobar y Despachar a n8n", "callback_data": f"pub_post:{post.id}"},
                     ],
                     [
-                        {"text": "🎠 Ver Carousel Web", "url": carousel_url},
-                        {"text": "🗑️ Descartar", "callback_data": f"del_post:{post.id}"}
+                        {"text": "Ver Carousel Web", "url": carousel_url},
+                        {"text": "Descartar", "callback_data": f"del_post:{post.id}"}
                     ]
                 ]
 
                 await self.send_message(chat_id, summary, reply_markup={"inline_keyboard": buttons})
             except Exception as e:
                 logger.error(f"Error generando post en Telegram: {e}")
-                await self.send_message(chat_id, f"❌ Error generando post: {str(e)}")
+                await self.send_message(chat_id, f"[ERROR] No se pudo generar el post: {str(e)}")
 
         elif cmd == "/pendientes":
             drafts = await self.content_storage.list_posts(status=ContentPostStatus.DRAFT, limit=5)
@@ -228,17 +228,17 @@ class TelegramBot:
                 await self.send_message(chat_id, "No hay borradores de contenido pendientes. Podés crear uno con <code>/post &lt;tema&gt;</code>.")
                 return
 
-            await self.send_message(chat_id, f"📋 <b>Top {len(drafts)} publicaciones en borrador pendientes:</b>")
+            await self.send_message(chat_id, f"<b>Top {len(drafts)} publicaciones en borrador pendientes:</b>")
             for post in drafts:
                 carousel_url = f"https://eros.mateogs.tech/api/content/carousel/{post.id}/html"
                 buttons = [
                     [
-                        {"text": "🚀 Aprobar n8n", "callback_data": f"pub_post:{post.id}"},
-                        {"text": "🎠 Ver Carousel", "url": carousel_url},
-                        {"text": "🗑️", "callback_data": f"del_post:{post.id}"}
+                        {"text": "Aprobar n8n", "callback_data": f"pub_post:{post.id}"},
+                        {"text": "Ver Carousel", "url": carousel_url},
+                        {"text": "Descartar", "callback_data": f"del_post:{post.id}"}
                     ]
                 ]
-                card = f"📌 <b>{post.title}</b> ({post.pillar.value})\n<i>{post.hook[:120]}...</i>"
+                card = f"• <b>{post.title}</b> ({post.pillar.value})\n<i>{post.hook[:120]}...</i>"
                 await self.send_message(chat_id, card, reply_markup={"inline_keyboard": buttons})
 
         elif cmd == "/status":
@@ -247,7 +247,7 @@ class TelegramBot:
             drafts = await self.content_storage.list_posts(status=ContentPostStatus.DRAFT)
             published = await self.content_storage.list_posts(status=ContentPostStatus.PUBLISHED)
             status_text = (
-                "📊 <b>ESTADO DE EROS AGENT</b>\n\n"
+                "<b>[ESTADO DE EROS AGENT]</b>\n\n"
                 f"• <b>Vacantes pendientes:</b> {len(unseen)}\n"
                 f"• <b>Vacantes con match ≥ 70%:</b> {len(matched)}\n"
                 f"• <b>Posts en borrador:</b> {len(drafts)}\n"
@@ -260,7 +260,7 @@ class TelegramBot:
         elif cmd == "/perfil":
             profile = await self.engine.get_active_profile()
             perfil_text = (
-                f"👤 <b>PERFIL ACTIVO EN MEMORIA</b>\n\n"
+                f"<b>[PERFIL ACTIVO EN MEMORIA]</b>\n\n"
                 f"• <b>Nombre:</b> {profile.name}\n"
                 f"• <b>Rol:</b> {profile.role}\n"
                 f"• <b>Ubicación:</b> {profile.location} ({profile.timezone})\n"
@@ -272,21 +272,21 @@ class TelegramBot:
             await self.send_message(chat_id, perfil_text)
 
         elif cmd == "/sync":
-            await self.send_message(chat_id, "⏳ Sincronizando datos desde tu API en mateogs.tech...")
+            await self.send_message(chat_id, "<i>[SINCRONIZANDO] Obteniendo datos desde mateogs.tech...</i>")
             profile = await self.engine.sync_profile()
             await self.send_message(
                 chat_id,
-                f"✅ <b>Sincronización completada:</b>\n{len(profile.projects)} proyectos y {len(profile.tech_stack)} tecnologías cargadas."
+                f"<b>[OK] Sincronización completada:</b>\n{len(profile.projects)} proyectos y {len(profile.tech_stack)} tecnologías cargadas."
             )
 
         elif cmd == "/buscar":
-            await self.send_message(chat_id, "🔎 <b>Iniciando búsqueda en Get on Board, RemoteOK y Hacker News...</b>")
+            await self.send_message(chat_id, "<i>[BUSCANDO] Consultando Get on Board, RemoteOK y Hacker News...</i>")
             scan_res = await self.engine.run_scan()
             eval_res = await self.engine.evaluate_pending_jobs(limit=10)
 
             high_matches = [m for m in eval_res if m[1].score >= self.settings.match_min_score]
             msg = (
-                f"🏁 <b>Búsqueda finalizada:</b>\n"
+                f"<b>[FINALIZADO] Resultados de búsqueda:</b>\n"
                 f"• Nuevas ofertas encontradas: {scan_res['new_jobs']}\n"
                 f"• Evaluadas en este lote: {len(eval_res)}\n"
                 f"• Matches destacados (≥{self.settings.match_min_score}%): {len(high_matches)}"
@@ -302,21 +302,20 @@ class TelegramBot:
                 await self.send_message(chat_id, "No hay ofertas pendientes con score ≥ 75%. Probá ejecutar <code>/buscar</code>.")
                 return
 
-            await self.send_message(chat_id, f"📋 <b>Top {len(matched)} ofertas más compatibles:</b>")
+            await self.send_message(chat_id, f"<b>Top {len(matched)} ofertas más compatibles:</b>")
             for job in matched:
                 buttons = [
                     [
-                        {"text": "✉️ Pitch", "callback_data": f"pitch:{job.id}"},
-                        {"text": "🔗 Ver", "url": job.url},
-                        {"text": "❌", "callback_data": f"discard:{job.id}"}
+                        {"text": "Pitch", "callback_data": f"pitch:{job.id}"},
+                        {"text": "Ver Oferta", "url": job.url},
+                        {"text": "Descartar", "callback_data": f"discard:{job.id}"}
                     ]
                 ]
-                card = f"🎯 <b>Match {job.match_score}%</b>: {job.title} en <b>{job.company}</b> ({job.source.upper()})"
+                card = f"• <b>Match {job.match_score}%</b>: {job.title} en <b>{job.company}</b> ({job.source.upper()})"
                 await self.send_message(chat_id, card, reply_markup={"inline_keyboard": buttons})
 
     async def _handle_callback(self, cb_id: str, chat_id: int | str, data: str) -> None:
         """Maneja clics en botones inline como 'pitch:<id>', 'discard:<id>', 'pub_post:<id>'."""
-        # Responder a Telegram para apagar el reloj de carga en el botón
         async with httpx.AsyncClient(timeout=5.0) as client:
             try:
                 await client.post(f"{self.base_url}/answerCallbackQuery", json={"callback_query_id": cb_id})
@@ -325,36 +324,36 @@ class TelegramBot:
 
         if data.startswith("pub_post:"):
             post_id = data.split("pub_post:")[1]
-            await self.send_message(chat_id, f"🚀 <i>Procesando aprobación y despacho para la publicación {post_id}...</i>")
+            await self.send_message(chat_id, f"<i>[DESPACHO] Aprobando y enviando post {post_id} a n8n...</i>")
             res = await self.content_dispatcher.publish_post(post_id)
             if res.get("ok"):
                 status_note = "Enviado a n8n para distribución automática." if res.get("status") == "published" else res.get("message")
-                await self.send_message(chat_id, f"✅ <b>Publicación aprobada exitosamente!</b>\n{status_note}")
+                await self.send_message(chat_id, f"<b>[APROBADO] Publicación procesada con éxito:</b>\n{status_note}")
             else:
-                await self.send_message(chat_id, f"⚠️ Error en despacho: {res.get('error')}")
+                await self.send_message(chat_id, f"<b>[ERROR] Falla en despacho:</b> {res.get('error')}")
 
         elif data.startswith("del_post:"):
             post_id = data.split("del_post:")[1]
             await self.content_storage.update_status(post_id, ContentPostStatus.REJECTED)
-            await self.send_message(chat_id, f"🗑️ Publicación {post_id} descartada.")
+            await self.send_message(chat_id, f"Publicación {post_id} descartada.")
 
         elif data.startswith("pitch:"):
             job_id = data.split("pitch:")[1]
-            await self.send_message(chat_id, "✍️ <i>Generando pitch a medida con tus proyectos y métricas...</i>")
+            await self.send_message(chat_id, "<i>[PITCH] Redactando propuesta con tus proyectos y métricas...</i>")
             pitch = await self.engine.generate_pitch_for_job(job_id)
             if not pitch:
                 await self.send_message(chat_id, "No se pudo recuperar la oferta para redactar el pitch.")
                 return
 
             pitch_msg = (
-                f"✉️ <b>PITCH PERSONALIZADO PARA LA VACANTE</b>\n\n"
-                f"📌 <b>Asunto / Asunto sugerido:</b>\n<code>{pitch.subject_or_hook}</code>\n\n"
-                f"💬 <b>Propuesta directa:</b>\n<pre>{pitch.elevator_pitch}</pre>\n\n"
-                f"⭐ <b>Proyectos citados:</b> {', '.join(pitch.suggested_projects)}"
+                f"<b>[PITCH PERSONALIZADO PARA LA VACANTE]</b>\n\n"
+                f"• <b>Asunto sugerido:</b>\n<code>{pitch.subject_or_hook}</code>\n\n"
+                f"• <b>Propuesta directa:</b>\n<pre>{pitch.elevator_pitch}</pre>\n\n"
+                f"• <b>Proyectos citados:</b> {', '.join(pitch.suggested_projects)}"
             )
             await self.send_message(chat_id, pitch_msg)
 
         elif data.startswith("discard:"):
             job_id = data.split("discard:")[1]
             await self.engine.storage.update_job_status(job_id, JobStatus.DISCARDED)
-            await self.send_message(chat_id, "🗑️ Vacante descartada de la lista.")
+            await self.send_message(chat_id, "Vacante descartada de la lista.")

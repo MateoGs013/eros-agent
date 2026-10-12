@@ -61,7 +61,7 @@ async def main() -> None:
     # 1. Sincronizar perfil
     if args.sync:
         profile = await engine.sync_profile()
-        print(f"\n✅ Perfil sincronizado con éxito:")
+        print(f"\n[OK] Perfil sincronizado con éxito:")
         print(f"• Nombre: {profile.name}")
         print(f"• Rol: {profile.role}")
         print(f"• Ubicación: {profile.location} ({profile.timezone})")
@@ -79,28 +79,28 @@ async def main() -> None:
         c_storage = ContentStorage()
         await c_storage.init_db()
         gen = ContentGenerator(storage=c_storage, engine=engine)
-        print(f"\n✍️ Generando publicación omnicanal con Gemini para: '{args.post}'...")
+        print(f"\n[GENERANDO] Creando publicación omnicanal con Gemini para: '{args.post}'...")
         post = await gen.generate_post(ContentGenerateRequest(topic=args.post, pillar=ContentPillar.ARCHITECTURE))
-        print(f"\n✅ Publicación generada con ID: {post.id}")
-        print(f"📌 Título: {post.title}")
-        print(f"🎯 Hook:\n{post.hook}\n")
-        print(f"🧵 Tweets: {len(post.twitter_thread)}")
-        print(f"🎠 Slides Carousel: {len(post.carousel_slides)}")
-        print(f"🔗 Ver Carousel en navegador: http://localhost:{args.port}/api/content/carousel/{post.id}/html")
+        print(f"\n[OK] Publicación generada con ID: {post.id}")
+        print(f"• Título: {post.title}")
+        print(f"• Hook:\n{post.hook}\n")
+        print(f"• Tweets: {len(post.twitter_thread)}")
+        print(f"• Slides Carousel: {len(post.carousel_slides)}")
+        print(f"• Ver Carousel en navegador: http://localhost:{args.port}/api/content/carousel/{post.id}/html")
         return
 
     # 3. Escanear
     if args.scan:
-        print("\n🔎 Escaneando Get on Board, RemoteOK y Hacker News...")
+        print("\n[BUSCANDO] Escaneando Get on Board, RemoteOK y Hacker News...")
         res = await engine.run_scan()
-        print(f"✅ Finalizado: {res['total_found']} ofertas obtenidas ({res['new_jobs']} nuevas en la base).")
+        print(f"[OK] Finalizado: {res['total_found']} ofertas obtenidas ({res['new_jobs']} nuevas en la base).")
         return
 
     # 4. Evaluar
     if args.evaluate:
-        print("\n🧠 Evaluando vacantes con el LLM Matcher...")
+        print("\n[EVALUANDO] Evaluando vacantes con el LLM Matcher...")
         matches = await engine.evaluate_pending_jobs(limit=5)
-        print(f"✅ Se evaluaron {len(matches)} vacantes:")
+        print(f"[OK] Se evaluaron {len(matches)} vacantes:")
         for job, match in matches:
             print(f"  • [{match.score}%] {job.title} en {job.company} -> {match.verdict}")
         return
@@ -108,16 +108,16 @@ async def main() -> None:
     # 5. Solo bot
     if args.bot:
         if not bot.is_configured:
-            print("❌ TELEGRAM_BOT_TOKEN no configurado en .env.")
+            print("[ERROR] TELEGRAM_BOT_TOKEN no configurado en .env.")
             sys.exit(1)
-        print("🤖 Iniciando bot de Telegram (Ctrl+C para salir)...")
+        print("[INICIANDO] Bot de Telegram activo (Ctrl+C para salir)...")
         await bot.start_polling()
         return
 
     # 6. Modo demonio: Servidor FastAPI + Bot de Telegram
     if args.daemon:
         import uvicorn
-        print(f"🚀 Iniciando Modo Demonio (API Server + Bot Telegram)...")
+        print(f"[INICIANDO] Modo Demonio (API Server + Bot Telegram)...")
         config = uvicorn.Config("eros.api:app", host="0.0.0.0", port=args.port, log_level="info")
         server = uvicorn.Server(config)
         tasks = [server.serve()]
@@ -128,7 +128,7 @@ async def main() -> None:
 
     # 7. Servidor FastAPI por defecto
     import uvicorn
-    print(f"🚀 Iniciando Eros Agent API Server en http://0.0.0.0:{args.port}...")
+    print(f"[INICIANDO] Eros Agent API Server en http://0.0.0.0:{args.port}...")
     config = uvicorn.Config("eros.api:app", host="0.0.0.0", port=args.port, log_level="info")
     server = uvicorn.Server(config)
     await server.serve()

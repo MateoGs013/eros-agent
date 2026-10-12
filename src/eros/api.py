@@ -25,6 +25,7 @@ from eros.content.storage import ContentStorage
 from eros.content.generator import ContentGenerator
 from eros.content.carousel import CarouselRenderer
 from eros.content.dispatcher import ContentDispatcher
+from eros.bot.telegram import TelegramBot
 
 logger = logging.getLogger("eros.api")
 
@@ -33,6 +34,7 @@ settings = get_settings()
 content_storage = ContentStorage()
 content_generator = ContentGenerator(storage=content_storage, engine=engine)
 content_dispatcher = ContentDispatcher(storage=content_storage)
+telegram_bot = TelegramBot(engine=engine)
 
 
 @asynccontextmanager
@@ -41,7 +43,18 @@ async def lifespan(app: FastAPI):
     await engine.initialize()
     await content_storage.init_db()
     logger.info("Eros Hunter API y Content Engine inicializados.")
+
+    bot_task = None
+    if telegram_bot.is_configured:
+        logger.info("Iniciando bot de Telegram en segundo plano...")
+        bot_task = asyncio.create_task(telegram_bot.start_polling())
+
     yield
+
+    if bot_task:
+        logger.info("Deteniendo bot de Telegram...")
+        telegram_bot.running = False
+        bot_task.cancel()
 
 
 app = FastAPI(
