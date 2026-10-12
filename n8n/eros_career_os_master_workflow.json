@@ -1,0 +1,341 @@
+{
+  "name": "Eros Career OS · Master Automation (Omnichannel & Crons)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "eros-content",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook: /webhook/eros-content",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        220,
+        300
+      ],
+      "webhookId": "eros-content"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{\n  \"ok\": true,\n  \"message\": \"Contenido recibido y puesto en cola de publicacion\"\n}",
+        "options": {}
+      },
+      "id": "respond-webhook",
+      "name": "Respuesta Inmediata Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        460,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "weeks",
+              "triggerAtDay": [
+                1
+              ],
+              "triggerAtHour": 9,
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      },
+      "id": "cron-weekly-content",
+      "name": "Cron Semanal (Lunes 09:00 AM)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        220,
+        -100
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://api.github.com/repos/MateoGs013/portfolio/commits?per_page=5",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "ErosCareerOS"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "github-commits",
+      "name": "GitHub: Commits Recientes",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        460,
+        -100
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst messages = items.map(i => i.json.commit?.message || '').filter(m => m.length > 5);\nconst keyPoints = messages.slice(0, 4).map(m => m.split('\\n')[0]);\n\nreturn [{\n  json: {\n    topic: 'Arquitectura y optimizaciones recientes en mateogs.tech',\n    key_points: keyPoints.length > 0 ? keyPoints : ['Optimizacion de rendimiento frontend', 'Tipado estricto con TypeScript', 'Despliegue continuo en VPS'],\n    project_name: 'Portafolio Dos Mundos'\n  }\n}];"
+      },
+      "id": "extract-commit-insights",
+      "name": "Code: Formatear Insights",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        700,
+        -100
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://eros.mateogs.tech/api/content/generate",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer Adctopmid123"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"topic\": $json.topic,\n  \"key_points\": $json.key_points,\n  \"project_name\": $json.project_name\n}",
+        "options": {}
+      },
+      "id": "eros-generate-content",
+      "name": "Eros: Generar Post Omnicanal",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        940,
+        -100
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 8,18 * * *"
+            }
+          ]
+        }
+      },
+      "id": "cron-daily-hunter",
+      "name": "Cron Diario Hunter (08:00 y 18:00)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        220,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://eros.mateogs.tech/api/scan?evaluate=true",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer Adctopmid123"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "eros-trigger-scan",
+      "name": "Eros: Escanear & Notificar Vacantes",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        460,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.linkedin.com/v2/ugcPosts",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $credentials.linkedinOAuth2.oauthToken }}"
+            },
+            {
+              "name": "X-Restli-Protocol-Version",
+              "value": "2.0.0"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"author\": \"urn:li:person:{{ $credentials.linkedinOAuth2.personId }}\",\n  \"lifecycleState\": \"PUBLISHED\",\n  \"specificContent\": {\n    \"com.linkedin.ugc.ShareContent\": {\n      \"shareCommentary\": {\n        \"text\": $json.body.linkedin_post || $json.linkedin_post || $json.body.hook\n      },\n      \"shareMediaCategory\": \"NONE\"\n    }\n  },\n  \"visibility\": {\n    \"com.linkedin.ugc.MemberNetworkVisibility\": \"PUBLIC\"\n  }\n}",
+        "options": {}
+      },
+      "id": "linkedin-publish-post",
+      "name": "LinkedIn: Publicar Post Principal",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        720,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.linkedin.com/v2/socialActions/{{ $json.id }}/comments",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $credentials.linkedinOAuth2.oauthToken }}"
+            },
+            {
+              "name": "X-Restli-Protocol-Version",
+              "value": "2.0.0"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"actor\": \"urn:li:person:{{ $credentials.linkedinOAuth2.personId }}\",\n  \"message\": {\n    \"text\": $('Respuesta Inmediata Webhook').item.json.body.first_comment || \"Portafolio y arquitectura: https://mateogs.tech\"\n  }\n}",
+        "options": {}
+      },
+      "id": "linkedin-first-comment",
+      "name": "LinkedIn: Primer Comentario (Link)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        980,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.twitter.com/2/tweets",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth1Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"text\": $json.body.twitter_thread && $json.body.twitter_thread.length > 0 ? $json.body.twitter_thread[0] : ($json.body.hook || 'Nuevo analisis de arquitectura en https://mateogs.tech')\n}",
+        "options": {}
+      },
+      "id": "twitter-publish-thread",
+      "name": "X / Twitter: Publicar Hook / Tweet 1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        720,
+        420
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook: /webhook/eros-content": {
+      "main": [
+        [
+          {
+            "node": "Respuesta Inmediata Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respuesta Inmediata Webhook": {
+      "main": [
+        [
+          {
+            "node": "LinkedIn: Publicar Post Principal",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "X / Twitter: Publicar Hook / Tweet 1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LinkedIn: Publicar Post Principal": {
+      "main": [
+        [
+          {
+            "node": "LinkedIn: Primer Comentario (Link)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cron Semanal (Lunes 09:00 AM)": {
+      "main": [
+        [
+          {
+            "node": "GitHub: Commits Recientes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GitHub: Commits Recientes": {
+      "main": [
+        [
+          {
+            "node": "Code: Formatear Insights",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Formatear Insights": {
+      "main": [
+        [
+          {
+            "node": "Eros: Generar Post Omnicanal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cron Diario Hunter (08:00 y 18:00)": {
+      "main": [
+        [
+          {
+            "node": "Eros: Escanear & Notificar Vacantes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
