@@ -178,14 +178,14 @@ class TelegramBot:
                 "<b>[EROS CAREER OS] Panel de Control</b>\n\n"
                 "Monitoreo de ofertas tech compatibles y generador de contenido técnico omnicanal.\n\n"
                 "<b>Contenido y Marca:</b>\n"
-                "• <code>/post &lt;tema&gt;</code> &rarr; Generar post omnicanal (LinkedIn, X, Dev.to y Carousel 5 slides).\n"
-                "• <code>/pendientes</code> &rarr; Ver borradores pendientes de aprobación para n8n.\n\n"
+                "• <code>/post &lt;tema&gt;</code> → Generar post omnicanal (LinkedIn, X, Dev.to y Carousel 5 slides).\n"
+                "• <code>/pendientes</code> → Ver borradores pendientes de aprobación para n8n.\n\n"
                 "<b>Búsqueda Laboral (Hunter):</b>\n"
-                "• <code>/buscar</code> &rarr; Escanear ofertas ahora en todas las fuentes.\n"
-                "• <code>/ofertas</code> &rarr; Ver mejores vacantes detectadas (&ge; 75%).\n"
-                "• <code>/status</code> &rarr; Resumen del sistema y base de datos.\n"
-                "• <code>/perfil</code> &rarr; Ver datos sincronizados de tu portafolio.\n"
-                "• <code>/sync</code> &rarr; Forzar actualización desde mateogs.tech."
+                "• <code>/buscar</code> → Escanear ofertas ahora en todas las fuentes.\n"
+                "• <code>/ofertas</code> → Ver mejores vacantes detectadas (≥ 75%).\n"
+                "• <code>/status</code> → Resumen del sistema y base de datos.\n"
+                "• <code>/perfil</code> → Ver datos sincronizados de tu portafolio.\n"
+                "• <code>/sync</code> → Forzar actualización desde mateogs.tech."
             )
             await self.send_message(chat_id, welcome)
 
