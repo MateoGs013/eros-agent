@@ -141,6 +141,32 @@ class LLMClient:
                 "suggested_projects": ["Portafolio Dos Mundos", "La Rúcula", "Ynara"]
             })
 
+        # Si se esperaba JSON de contenido técnico:
+        if "carousel_slides" in prompt or "linkedin_post" in prompt:
+            return json.dumps({
+                "title": "Optimización y Arquitectura Frontend en Producción",
+                "hook": "En producción, la teoría choca con la realidad del usuario. Así optimizamos el critical rendering path.",
+                "linkedin_post": "En producción, la teoría choca con la realidad.\n\n• Reducción de cascada de red.\n• Estrategias de SSR y prefetching.\n• Métricas comprobadas en Lighthouse.\n\n#webdev #frontend #vuejs #architecture",
+                "first_comment": "Detalles técnicos completos en https://mateogs.tech",
+                "twitter_thread": [
+                    "1/3 Optimización frontend en producción: lecciones aprendidas.",
+                    "2/3 El cuello de botella principal fue la cascada de recursos bloqueantes.",
+                    "3/3 Con prefetching y compresión Brotli bajamos latencia un 60%."
+                ],
+                "devto_article": {
+                    "title": "Optimización y Arquitectura Frontend en Producción",
+                    "tags": ["webdev", "architecture", "vue", "performance"],
+                    "markdown_body": "# Lecciones de producción\n\nDetalles de arquitectura e implementación."
+                },
+                "carousel_slides": [
+                    {"index": 1, "title": "Arquitectura Frontend", "subtitle": "Lecciones en producción", "bullets": ["Latencia reducida", "Cero layout shifts"], "metric_badge": "99/100", "code_snippet": None, "footer": "mateogs.tech"},
+                    {"index": 2, "title": "El Problema", "subtitle": "Cascada de bloqueo", "bullets": ["Render blocking scripts"], "metric_badge": None, "code_snippet": None, "footer": "Producción"},
+                    {"index": 3, "title": "La Solución", "subtitle": "Hydration diferida", "bullets": ["Lazy load selectivo"], "metric_badge": None, "code_snippet": "defineAsyncComponent(() => import('./Widget.vue'))", "footer": "Código"},
+                    {"index": 4, "title": "Métricas", "subtitle": "Benchmarks", "bullets": ["-60% TTFB", "+35 puntos Lighthouse"], "metric_badge": "-60% TTFB", "code_snippet": None, "footer": "Resultados"},
+                    {"index": 5, "title": "Conclusión", "subtitle": "Accionable", "bullets": ["Mide antes de optimizar", "Prioriza el critical path"], "metric_badge": "mateogs.tech", "code_snippet": None, "footer": "Mateo Sonzogni"}
+                ]
+            })
+
         # Si se esperaba JSON de matching:
         if "JSON" in prompt:
             return json.dumps({
