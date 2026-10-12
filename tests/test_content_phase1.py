@@ -137,7 +137,7 @@ class TestPhase1ContentAudit(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Arquitectura de Alto Rendimiento", html_out)
         self.assertIn("99/100 Lighthouse", html_out)
         self.assertIn("const bottleneck = await fetchAllSync();", html_out)
-        self.assertIn("DESLIZÁ PARA MÁS &rarr;", html_out)
+        self.assertIn("DESLIZAR &rarr;", html_out)
         self.assertIn("<svg", html_out)
 
         # 2. Verificar ausencia total de emojis

@@ -4,7 +4,7 @@ from eros.content.models import ContentPost, SlideItem
 
 
 class CarouselRenderer:
-    """Renderizador de Carousels en HTML/CSS de alto impacto para LinkedIn."""
+    """Renderizador de Carousels con la identidad técnica oficial 'Mundo DATOS' de Mateo Sonzogni."""
 
     @staticmethod
     def render_html(post: ContentPost, auto_print: bool = False) -> str:
@@ -52,7 +52,7 @@ class CarouselRenderer:
                 </div>
                 """
 
-            footer_text = s.footer or "Mateo Sonzogni · mateogs.tech"
+            footer_text = s.footer or "Mateo Sonzogni // mateogs.tech"
 
             slides_html += f"""
             <div class="slide {is_active}" data-index="{i}">
@@ -60,7 +60,10 @@ class CarouselRenderer:
                     <div class="slide-top">
                         <div class="brand">
                             <span class="brand-logo">M</span>
-                            <span class="brand-name">MATEO GABRIEL SONZOGNI</span>
+                            <div class="brand-info">
+                                <span class="brand-name">MATEO SONZOGNI</span>
+                                <span class="brand-sub">MATEOGS.TECH // DATOS</span>
+                            </div>
                         </div>
                         <div class="slide-counter">
                             <span class="counter-num">{s.index:02d}</span>
@@ -82,7 +85,7 @@ class CarouselRenderer:
 
                     <div class="slide-footer">
                         <div class="footer-left">
-                            <span class="swipe-hint">DESLIZÁ PARA MÁS &rarr;</span>
+                            <span class="swipe-hint">DESLIZAR &rarr;</span>
                         </div>
                         <div class="footer-right">
                             <span class="footer-meta">{html.escape(footer_text)}</span>
@@ -104,19 +107,24 @@ class CarouselRenderer:
     <title>{html.escape(post.title)} — Carousel LinkedIn</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Martian+Mono:wght@400;500;600;700;800&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
         :root {{
-            --bg-base: #06080b;
-            --bg-card: #0d1117;
-            --bg-surface: #151b23;
-            --border-glow: rgba(16, 185, 129, 0.25);
-            --border-subtle: #21262d;
-            --text-main: #f0f6fc;
-            --text-muted: #8b949e;
-            --accent-emerald: #10b981;
-            --accent-cyan: #06b6d4;
-            --accent-glow: rgba(6, 182, 212, 0.15);
+            /* Tokens oficiales de Mundo DATOS (mateogs.tech) */
+            --d-paper: #09090b;
+            --d-surface: #121215;
+            --d-surface-raised: #19191e;
+            --d-ink: #f4f4f5;
+            --d-dim: #929298;
+            --d-faint: #7c7c82;
+            --d-rule: rgba(255, 255, 255, 0.08);
+            --d-rule-strong: rgba(255, 255, 255, 0.16);
+            --d-sig: #ff3e00;
+            --d-sig-hover: #ff551c;
+            --d-sig-glow: rgba(255, 62, 0, 0.28);
+            --d-sig-bg: rgba(255, 62, 0, 0.09);
+            --font-mono: 'Martian Mono', ui-monospace, monospace;
+            --font-display: 'Space Grotesk', system-ui, -apple-system, sans-serif;
             --slide-w: 1080px;
             --slide-h: 1350px;
         }}
@@ -128,9 +136,9 @@ class CarouselRenderer:
         }}
 
         body {{
-            background: #020408;
-            color: var(--text-main);
-            font-family: 'Inter', system-ui, -apple-system, sans-serif;
+            background: #040405;
+            color: var(--d-ink);
+            font-family: var(--font-display);
             min-height: 100vh;
             display: flex;
             flex-direction: column;
@@ -140,29 +148,31 @@ class CarouselRenderer:
 
         /* Toolbar UI (Oculta al imprimir) */
         .toolbar {{
-            background: rgba(13, 17, 23, 0.85);
-            backdrop-filter: blur(12px);
-            border: 1px solid var(--border-subtle);
-            border-radius: 14px;
+            background: rgba(18, 18, 21, 0.88);
+            backdrop-filter: blur(14px);
+            border: 1px solid var(--d-rule-strong);
+            border-radius: 12px;
             padding: 12px 24px;
             margin-bottom: 24px;
             display: flex;
             align-items: center;
             gap: 16px;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.7);
             position: sticky;
             top: 16px;
             z-index: 100;
+            font-family: var(--font-mono);
         }}
 
         .btn {{
-            background: var(--bg-surface);
-            color: var(--text-main);
-            border: 1px solid var(--border-subtle);
+            background: var(--d-surface-raised);
+            color: var(--d-ink);
+            border: 1px solid var(--d-rule);
             padding: 8px 16px;
-            border-radius: 8px;
-            font-size: 14px;
+            border-radius: 6px;
+            font-size: 13px;
             font-weight: 600;
+            font-family: var(--font-mono);
             cursor: pointer;
             transition: all 0.2s ease;
             display: inline-flex;
@@ -171,21 +181,22 @@ class CarouselRenderer:
         }}
 
         .btn:hover {{
-            background: #21262d;
-            border-color: var(--accent-emerald);
+            background: #23232a;
+            border-color: var(--d-sig);
             color: #fff;
         }}
 
         .btn-primary {{
-            background: #10b981;
-            color: #06080b;
-            border-color: #10b981;
+            background: var(--d-sig);
+            color: #ffffff;
+            border-color: var(--d-sig);
+            box-shadow: 0 0 16px var(--d-sig-glow);
         }}
 
         .btn-primary:hover {{
-            background: #059669;
-            border-color: #059669;
-            color: #fff;
+            background: var(--d-sig-hover);
+            border-color: var(--d-sig-hover);
+            color: #ffffff;
         }}
 
         .pill-group {{
@@ -194,24 +205,27 @@ class CarouselRenderer:
         }}
 
         .pill {{
-            background: #161b22;
-            color: var(--text-muted);
-            border: 1px solid var(--border-subtle);
+            background: var(--d-surface);
+            color: var(--d-dim);
+            border: 1px solid var(--d-rule);
             width: 32px;
             height: 32px;
             border-radius: 6px;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 13px;
+            font-size: 12px;
+            font-family: var(--font-mono);
             font-weight: 700;
             cursor: pointer;
+            transition: all 0.15s ease;
         }}
 
         .pill.active {{
-            background: var(--accent-emerald);
-            color: #06080b;
-            border-color: var(--accent-emerald);
+            background: var(--d-sig);
+            color: #ffffff;
+            border-color: var(--d-sig);
+            box-shadow: 0 0 10px var(--d-sig-glow);
         }}
 
         /* Contenedor de Diapositivas */
@@ -219,9 +233,9 @@ class CarouselRenderer:
             width: 540px;
             height: 675px; /* Proporción 4:5 a escala 0.5x en navegador */
             position: relative;
-            background: var(--bg-base);
-            border-radius: 16px;
-            box-shadow: 0 25px 60px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(255, 255, 255, 0.05);
+            background: var(--d-paper);
+            border-radius: 14px;
+            box-shadow: 0 30px 70px rgba(0, 0, 0, 0.9), 0 0 0 1px var(--d-rule);
             overflow: hidden;
         }}
 
@@ -236,9 +250,13 @@ class CarouselRenderer:
             opacity: 0;
             pointer-events: none;
             transition: opacity 0.25s ease;
-            background: radial-gradient(circle at 10% 20%, rgba(16, 185, 129, 0.08) 0%, transparent 40%),
-                        radial-gradient(circle at 90% 80%, rgba(6, 182, 212, 0.06) 0%, transparent 45%),
-                        #07090e;
+            background-color: var(--d-paper);
+            background-image:
+                radial-gradient(circle at 90% 10%, rgba(255, 62, 0, 0.12) 0%, transparent 45%),
+                radial-gradient(circle at 10% 90%, rgba(255, 62, 0, 0.05) 0%, transparent 40%),
+                linear-gradient(to right, rgba(255, 255, 255, 0.022) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(255, 255, 255, 0.022) 1px, transparent 1px);
+            background-size: 100% 100%, 100% 100%, 54px 54px, 54px 54px;
         }}
 
         .slide.active {{
@@ -249,12 +267,12 @@ class CarouselRenderer:
         .slide-inner {{
             width: 100%;
             height: 100%;
-            padding: 80px 75px;
+            padding: 85px 80px;
             display: flex;
             flex-direction: column;
             justify-content: space-between;
             position: relative;
-            border: 1px solid rgba(255, 255, 255, 0.04);
+            border: 1px solid var(--d-rule);
         }}
 
         /* Header Slide */
@@ -271,33 +289,55 @@ class CarouselRenderer:
         }}
 
         .brand-logo {{
-            width: 44px;
-            height: 44px;
-            background: linear-gradient(135deg, #10b981, #06b6d4);
-            color: #06080b;
-            font-weight: 900;
-            font-size: 24px;
+            width: 46px;
+            height: 46px;
+            background: var(--d-surface);
+            border: 1px solid var(--d-sig);
+            color: var(--d-sig);
+            font-family: var(--font-mono);
+            font-weight: 800;
+            font-size: 22px;
             display: flex;
             align-items: center;
             justify-content: center;
-            border-radius: 10px;
+            border-radius: 8px;
+            box-shadow: 0 0 16px var(--d-sig-bg);
+        }}
+
+        .brand-info {{
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
         }}
 
         .brand-name {{
-            font-size: 20px;
-            font-weight: 800;
-            letter-spacing: 2px;
-            color: #e6edf3;
+            font-family: var(--font-mono);
+            font-size: 18px;
+            font-weight: 700;
+            letter-spacing: 1.5px;
+            color: var(--d-ink);
+        }}
+
+        .brand-sub {{
+            font-family: var(--font-mono);
+            font-size: 11px;
+            letter-spacing: 1px;
+            color: var(--d-sig);
+            font-weight: 600;
         }}
 
         .slide-counter {{
-            font-family: 'Fira Code', monospace;
-            font-size: 22px;
-            color: var(--text-muted);
+            font-family: var(--font-mono);
+            font-size: 18px;
+            color: var(--d-dim);
+            background: var(--d-surface);
+            border: 1px solid var(--d-rule);
+            padding: 8px 16px;
+            border-radius: 6px;
         }}
 
         .counter-num {{
-            color: var(--accent-emerald);
+            color: var(--d-sig);
             font-weight: 700;
         }}
 
@@ -314,13 +354,14 @@ class CarouselRenderer:
             display: inline-flex;
             align-items: center;
             gap: 12px;
-            background: rgba(16, 185, 129, 0.12);
-            border: 1px solid rgba(16, 185, 129, 0.35);
-            color: #34d399;
+            background: var(--d-sig-bg);
+            border: 1px solid rgba(255, 62, 0, 0.45);
+            color: var(--d-sig);
             padding: 10px 22px;
             border-radius: 999px;
-            font-size: 20px;
+            font-size: 18px;
             font-weight: 700;
+            font-family: var(--font-mono);
             margin-bottom: 30px;
             width: fit-content;
         }}
@@ -328,26 +369,26 @@ class CarouselRenderer:
         .metric-dot {{
             width: 10px;
             height: 10px;
-            background: #10b981;
+            background: var(--d-sig);
             border-radius: 50%;
-            box-shadow: 0 0 12px #10b981;
+            box-shadow: 0 0 12px var(--d-sig);
         }}
 
         .slide-title {{
+            font-family: var(--font-display);
             font-size: 64px;
-            font-weight: 900;
+            font-weight: 700;
             line-height: 1.15;
             letter-spacing: -1.5px;
             margin-bottom: 24px;
-            background: linear-gradient(180deg, #ffffff 40%, #94a3b8 100%);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
+            color: #ffffff;
         }}
 
         .slide-subtitle {{
+            font-family: var(--font-display);
             font-size: 28px;
-            font-weight: 500;
-            color: #94a3b8;
+            font-weight: 400;
+            color: var(--d-dim);
             line-height: 1.45;
             margin-bottom: 40px;
         }}
@@ -356,52 +397,53 @@ class CarouselRenderer:
             list-style: none;
             display: flex;
             flex-direction: column;
-            gap: 24px;
+            gap: 22px;
         }}
 
         .bullet-item {{
             display: flex;
             align-items: flex-start;
             gap: 20px;
-            background: rgba(22, 27, 34, 0.7);
-            border: 1px solid rgba(255, 255, 255, 0.08);
+            background: var(--d-surface);
+            border: 1px solid var(--d-rule);
             padding: 24px 28px;
-            border-radius: 16px;
+            border-radius: 10px;
         }}
 
         .bullet-icon {{
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            color: var(--accent-emerald);
+            color: var(--d-sig);
             flex-shrink: 0;
             padding-top: 4px;
         }}
 
         .bullet-text {{
-            font-size: 26px;
-            font-weight: 500;
-            color: #e2e8f0;
+            font-family: var(--font-display);
+            font-size: 25px;
+            font-weight: 400;
+            color: var(--d-ink);
             line-height: 1.4;
         }}
 
         /* Caja de código */
         .code-box {{
-            background: #020408;
-            border: 1px solid #30363d;
-            border-radius: 14px;
+            background: #050507;
+            border: 1px solid var(--d-rule-strong);
+            border-radius: 10px;
             margin-bottom: 35px;
             overflow: hidden;
-            font-family: 'Fira Code', monospace;
+            font-family: var(--font-mono);
         }}
 
         .code-header {{
-            background: #161b22;
+            background: var(--d-surface);
             padding: 12px 18px;
             display: flex;
             align-items: center;
             gap: 8px;
-            border-bottom: 1px solid #30363d;
+            border-bottom: 1px solid var(--d-rule);
         }}
 
         .code-dot {{
@@ -414,15 +456,16 @@ class CarouselRenderer:
         .code-dot.green {{ background: #27c93f; }}
 
         .code-title {{
-            font-size: 14px;
-            color: #8b949e;
+            font-size: 13px;
+            color: var(--d-dim);
             margin-left: 8px;
+            font-family: var(--font-mono);
         }}
 
         .code-box pre {{
-            padding: 22px 24px;
+            padding: 24px 26px;
             font-size: 20px;
-            color: #38bdf8;
+            color: #ff9166;
             line-height: 1.5;
             white-space: pre-wrap;
             word-break: break-word;
@@ -434,20 +477,22 @@ class CarouselRenderer:
             justify-content: space-between;
             align-items: center;
             padding-top: 30px;
-            border-top: 1px solid rgba(255, 255, 255, 0.06);
+            border-top: 1px solid var(--d-rule);
         }}
 
         .swipe-hint {{
-            font-size: 18px;
-            font-weight: 800;
+            font-family: var(--font-mono);
+            font-size: 17px;
+            font-weight: 700;
             letter-spacing: 2px;
-            color: var(--accent-emerald);
+            color: var(--d-sig);
         }}
 
         .footer-meta {{
-            font-size: 20px;
-            font-weight: 600;
-            color: #64748b;
+            font-family: var(--font-mono);
+            font-size: 17px;
+            font-weight: 500;
+            color: var(--d-faint);
         }}
 
         /* ============================================================ */
