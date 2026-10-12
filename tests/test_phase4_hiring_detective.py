@@ -111,7 +111,7 @@ class TestPhase4HiringDetective(unittest.IsolatedAsyncioTestCase):
                         <a href="https://www.linkedin.com/in/sarah-connor-talent?ref=job_details">
                             <span class="hirer-name">Sarah Connor</span>
                         </a>
-                        <p class="role-headline">Lead Technical Recruiter at Cyberdyne</p>
+                        <p class="role-headline">Lead Technical Recruiter at Cyberdyne \U0001f680\u2728</p>
                     </div>
                 </div>
             </body>
@@ -122,6 +122,7 @@ class TestPhase4HiringDetective(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(name, "Sarah Connor")
         self.assertEqual(title, "Lead Technical Recruiter at Cyberdyne")
         self.assertEqual(url, "https://www.linkedin.com/in/sarah-connor-talent")
+        self.assertFalse(self._has_emojis(title))
 
     def test_04_linkedin_extractor_fallback_in_profile(self):
         """Verifica la detección de enlace de perfil /in/ cuando no hay clase formal."""

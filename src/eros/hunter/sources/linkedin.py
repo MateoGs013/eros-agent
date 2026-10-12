@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import re
 import httpx
 from bs4 import BeautifulSoup
 from eros.hunter.filters import check_job_qualification
@@ -205,4 +206,20 @@ class LinkedInJobsSource(BaseJobSource):
                 if link_text and 3 < len(link_text) < 50:
                     name = link_text
 
+        name = LinkedInJobsSource._clean_text_no_emojis(name)
+        title = LinkedInJobsSource._clean_text_no_emojis(title)
+
         return name, title, profile_url
+
+    @staticmethod
+    def _clean_text_no_emojis(text: str | None) -> str | None:
+        """Sanitiza texto eliminando emojis según el mandato estricto de cero emojis."""
+        if not text:
+            return None
+        emoji_pattern = re.compile(
+            r"[\U00010000-\U0010ffff]|[\u2600-\u27bf]|[\u2300-\u23ff]|[\u2b50-\u2b55]",
+            flags=re.UNICODE
+        )
+        cleaned = emoji_pattern.sub("", text).strip()
+        cleaned = re.sub(r"\s+", " ", cleaned)
+        return cleaned or None
