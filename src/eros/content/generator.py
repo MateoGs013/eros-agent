@@ -30,11 +30,12 @@ Reglas inquebrantables de estilo y tono:
 1. TONO: Ingenieril, honesto, empírico y directo. CERO frases motivacionales vacías de autoayuda ("persigue tus sueños", "nunca te rindas"). HABLA DE CÓDIGO, ARQUITECTURA, TRADE-OFFS Y MÉTRICAS REALES.
 2. EVIDENCIA REAL: Conecta las lecciones con los proyectos reales de Mateo (Portafolio Dos Mundos, La Rúcula, Ynara, ARG Piscinas, null-net, lampone, Eros Agent).
 3. FORMATO LINKEDIN:
+   - REGLA ESTRICTA: CERO EMOJIS. No uses emojis bajo ninguna circunstancia. Usa viñetas de texto limpias ("•", "→", "-") o numeradas.
    - Gancho (Hook): Primeras 2 líneas directas, contrastantes o con métricas antes de que el usuario haga clic en "ver más".
-   - Cuerpo: Problema real -> Hipótesis fallida o trade-off -> Arquitectura/Código implementado (bullet points con emojis técnicos limpios: ⚡, 🛠️, 💡, 📊) -> Métrica/Resultado medible.
+   - Cuerpo: Problema real -> Hipótesis fallida o trade-off -> Arquitectura/Código implementado (bullet points con viñetas limpias: • o →) -> Métrica/Resultado medible.
    - Cierre y Pregunta de Debate: Invita a otros TLs y desarrolladores a opinar sobre el enfoque.
    - 3 a 5 hashtags específicos del ecosistema (#webdev #frontend #typescript #softwarearchitecture #vuejs).
-   - Primer Comentario: Un comentario complementario con el enlace de producción o repositorio (ej: "🔗 Pueden ver la arquitectura en vivo y el panel en: https://mateogs.tech").
+   - Primer Comentario: Un comentario complementario con el enlace de producción o repositorio (ej: "Pueden ver la arquitectura en vivo y el panel en: https://mateogs.tech").
 4. FORMATO TWITTER/X:
    - Un hilo de 3 a 5 tweets.
    - Cada tweet DEBE tener menos de 275 caracteres.
@@ -134,7 +135,7 @@ Genera un JSON con esta estructura exacta:
 {{
   "title": "Título técnico atractivo para la pieza",
   "hook": "Las 2 primeras frases de alto impacto",
-  "linkedin_post": "Texto completo formateado para LinkedIn con emojis limpios, bullets y hashtags",
+  "linkedin_post": "Texto completo formateado para LinkedIn SIN EMOJIS (prohibido emojis, usar viñetas '•' o '→') y hashtags",
   "first_comment": "Texto del primer comentario con el enlace al proyecto o portafolio",
   "twitter_thread": [
     "1/4 Tweet inicial...",
@@ -222,8 +223,8 @@ Genera un JSON con esta estructura exacta:
             data = {
                 "title": f"Lecciones de Ingeniería: {topic}",
                 "hook": f"En producción, la teoría se choca con la realidad. Así abordamos {topic}.",
-                "linkedin_post": f"🚀 {topic}\n\nEn producción las cosas cambian. Aquí los aprendizajes y decisiones clave.\n\n#webdev #architecture",
-                "first_comment": "🔗 Podés ver más detalles técnicos en https://mateogs.tech",
+                "linkedin_post": f"{topic}\n\nEn producción las cosas cambian. Aquí los aprendizajes y decisiones clave.\n\n#webdev #architecture",
+                "first_comment": "Podés ver más detalles técnicos en https://mateogs.tech",
                 "twitter_thread": [f"1/2 Lecciones de producción sobre {topic}...", "2/2 Fin del hilo. Más en mateogs.tech"],
                 "devto_article": {
                     "title": f"Cómo abordamos {topic}",
@@ -267,7 +268,7 @@ Genera un JSON con esta estructura exacta:
             project_slug=project_slug,
             hook=str(data.get("hook", "")),
             linkedin_text=str(data.get("linkedin_post", "")),
-            first_comment=str(data.get("first_comment", "🔗 Portafolio y métricas en vivo: https://mateogs.tech")),
+            first_comment=str(data.get("first_comment", "Portafolio y métricas en vivo: https://mateogs.tech")),
             twitter_thread=[str(t) for t in data.get("twitter_thread", [])],
             devto=devto,
             carousel_slides=slides,

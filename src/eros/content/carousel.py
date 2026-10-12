@@ -20,7 +20,11 @@ class CarouselRenderer:
             for b in s.bullets:
                 bullets_html += f"""
                 <li class="bullet-item">
-                    <span class="bullet-icon">⚡</span>
+                    <span class="bullet-icon">
+                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="9 18 15 12 9 6"></polyline>
+                        </svg>
+                    </span>
                     <span class="bullet-text">{html.escape(b)}</span>
                 </li>
                 """
@@ -78,7 +82,7 @@ class CarouselRenderer:
 
                     <div class="slide-footer">
                         <div class="footer-left">
-                            <span class="swipe-hint">DESLIZÁ PARA MÁS ➔</span>
+                            <span class="swipe-hint">DESLIZÁ PARA MÁS &rarr;</span>
                         </div>
                         <div class="footer-right">
                             <span class="footer-meta">{html.escape(footer_text)}</span>
@@ -366,9 +370,12 @@ class CarouselRenderer:
         }}
 
         .bullet-icon {{
-            font-size: 26px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
             color: var(--accent-emerald);
             flex-shrink: 0;
+            padding-top: 4px;
         }}
 
         .bullet-text {{
@@ -488,12 +495,21 @@ class CarouselRenderer:
 <body>
 
     <div class="toolbar">
-        <button class="btn" onclick="prevSlide()">◀ Anterior</button>
+        <button class="btn" onclick="prevSlide()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>
+            Anterior
+        </button>
         <div class="pill-group" id="pillGroup">
             {"".join([f'<div class="pill {"active" if idx == 0 else ""}" onclick="goToSlide({idx})">{idx+1}</div>' for idx in range(len(slides))])}
         </div>
-        <button class="btn" onclick="nextSlide()">Siguiente ▶</button>
-        <button class="btn btn-primary" onclick="window.print()">🖨️ Imprimir / Guardar como PDF LinkedIn</button>
+        <button class="btn" onclick="nextSlide()">
+            Siguiente
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
+        </button>
+        <button class="btn btn-primary" onclick="window.print()">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
+            Imprimir / Guardar como PDF LinkedIn
+        </button>
     </div>
 
     <div class="carousel-stage" id="stage">
