@@ -1,5 +1,7 @@
 import json
 import logging
+import re
+from typing import Any
 import httpx
 from eros.config import get_settings
 
@@ -7,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 
 class LLMClient:
-    """Cliente unificado y asíncrono para Gemini y Claude sin dependencias pesadas."""
+    """Cliente unificado y asíncrono para Gemini y Claude con soporte para cascada de modelos y fallback inteligente."""
 
     def __init__(self):
         self.settings = get_settings()
@@ -21,7 +23,7 @@ class LLMClient:
         json_mode: bool = False,
         max_tokens: int = 4096,
     ) -> str:
-        """Genera una respuesta utilizando el proveedor configurado."""
+        """Genera una respuesta utilizando el proveedor configurado con cascada de modelos."""
         if prefer_model == "claude" and self.settings.anthropic_api_key:
             try:
                 return await self._call_claude(prompt, system_prompt)
@@ -29,18 +31,28 @@ class LLMClient:
                 logger.error(f"Error llamando a Claude API: {e}. Intentando fallback con Gemini...")
 
         if self.settings.gemini_api_key:
-            try:
-                return await self._call_gemini(
-                    prompt,
-                    system_prompt,
-                    temperature=temperature,
-                    json_mode=json_mode,
-                    max_tokens=max_tokens,
-                )
-            except Exception as e:
-                logger.error(f"Falla en Gemini ({e}). Usando evaluador heurístico.")
+            models_to_try: list[str] = [self.settings.gemini_model]
+            fallback_models = getattr(self.settings, "gemini_fallback_models", [])
+            for m in fallback_models:
+                if m not in models_to_try:
+                    models_to_try.append(m)
 
-        # Si aún no tiene API keys configuradas o falló la API, usamos un análisis heurístico inteligente como fallback
+            for model_name in models_to_try:
+                try:
+                    return await self._call_gemini(
+                        prompt,
+                        system_prompt,
+                        model=model_name,
+                        temperature=temperature,
+                        json_mode=json_mode,
+                        max_tokens=max_tokens,
+                    )
+                except Exception as e:
+                    logger.warning(f"Falla con modelo Gemini '{model_name}': {e}. Probando siguiente modelo de la cascada...")
+
+            logger.error("Todos los modelos de Gemini fallaron o experimentan alta demanda. Activando evaluador heurístico inteligente...")
+
+        # Si aún no tiene API keys configuradas o fallaron los proveedores externos, usamos un análisis heurístico inteligente como fallback
         return self._heuristic_fallback(prompt)
 
     async def _call_gemini(
@@ -53,24 +65,10 @@ class LLMClient:
         json_mode: bool = False,
     ) -> str:
         """Llama a la API de Google Gemini vía REST."""
-        active_model = model or getattr(self.settings, "gemini_model", "gemini-flash-lite-latest")
+        active_model = model or getattr(self.settings, "gemini_model", "gemini-3.5-flash")
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{active_model}:generateContent?key={self.settings.gemini_api_key}"
-        
-        contents = []
-        if system_prompt:
-            contents.append({
-                "role": "user",
-                "parts": [{"text": f"Instrucciones de sistema:\n{system_prompt}\n\nPor favor continúa."}]
-            })
-            contents.append({
-                "role": "model",
-                "parts": [{"text": "Entendido. Aplicaré las instrucciones de sistema estrictamente."}]
-            })
 
-        contents.append({
-            "role": "user",
-            "parts": [{"text": prompt}]
-        })
+        contents = [{"role": "user", "parts": [{"text": prompt}]}]
 
         gen_config: dict[str, Any] = {
             "temperature": temperature,
@@ -79,22 +77,27 @@ class LLMClient:
         if json_mode:
             gen_config["responseMimeType"] = "application/json"
 
-        payload = {
+        payload: dict[str, Any] = {
             "contents": contents,
             "generationConfig": gen_config,
         }
 
+        if system_prompt:
+            payload["systemInstruction"] = {
+                "parts": [{"text": system_prompt}]
+            }
+
         async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.post(url, json=payload)
             if resp.status_code != 200:
-                logger.error(f"Gemini API returned status {resp.status_code}: {resp.text}")
-                raise RuntimeError(f"Gemini API returned status {resp.status_code}: {resp.text}")
-            
+                logger.error(f"Gemini API ({active_model}) returned status {resp.status_code}: {resp.text}")
+                raise RuntimeError(f"Gemini API ({active_model}) returned status {resp.status_code}: {resp.text}")
+
             data = resp.json()
             candidates = data.get("candidates", [])
             if not candidates:
                 raise RuntimeError("Gemini no devolvió candidatos.")
-            
+
             parts = candidates[0].get("content", {}).get("parts", [])
             text = "".join([p.get("text", "") for p in parts])
             return text
@@ -120,11 +123,169 @@ class LLMClient:
             resp = await client.post(url, headers=headers, json=payload)
             if resp.status_code != 200:
                 raise RuntimeError(f"Claude API returned status {resp.status_code}: {resp.text}")
-            
+
             data = resp.json()
             content = data.get("content", [])
             text = "".join([c.get("text", "") for c in content if c.get("type") == "text"])
             return text
+
+    def _heuristic_evaluate_job(self, prompt: str) -> str:
+        """Evaluador semántico-heurístico dinámico cuando la API externa no está disponible."""
+        title_m = re.search(r"(?:Título|Puesto):\s*(.+)", prompt)
+        company_m = re.search(r"Empresa:\s*(.+)", prompt)
+        loc_m = re.search(r"(?:Ubicación\s*/\s*Modalidad|Ubicación):\s*(.+)", prompt)
+        salary_m = re.search(r"Salario:\s*(.+)", prompt)
+        tags_m = re.search(r"Tags:\s*(.+)", prompt)
+
+        title = title_m.group(1).strip() if title_m else "Software Engineer / Desarrollador Web"
+        company = company_m.group(1).strip() if company_m else "Empresa"
+        location = loc_m.group(1).strip() if loc_m else "Remoto"
+        salary = salary_m.group(1).strip() if salary_m else None
+        if salary and "no especificado" in salary.lower():
+            salary = None
+        tags = [t.strip() for t in tags_m.group(1).split(",")] if tags_m else []
+
+        desc = ""
+        if "DESCRIPCIÓN DE LA VACANTE:" in prompt:
+            parts = prompt.split("DESCRIPCIÓN DE LA VACANTE:", 1)
+            desc_part = parts[1]
+            if "INFORMACIÓN ACTUALIZADA DE MATEO:" in desc_part:
+                desc = desc_part.split("INFORMACIÓN ACTUALIZADA DE MATEO:", 1)[0].strip()
+            else:
+                desc = desc_part[:2500].strip()
+        else:
+            desc = prompt[:2500]
+
+        full_text = f"{title} {location} {' '.join(tags)} {desc}".lower()
+
+        stack_map = {
+            "Vue / Nuxt": ["vue", "nuxt", "vue 3", "vue.js", "nuxt 4"],
+            "TypeScript / JavaScript": ["typescript", "ts", "javascript", "js", "ecmascript"],
+            "Node.js / Express": ["node", "nodejs", "node.js", "express", "express.js"],
+            "PostgreSQL / SQL": ["postgresql", "postgres", "sql", "prisma", "pgvector", "relational database"],
+            "React / Next.js": ["react", "react.js", "next.js", "nextjs", "next"],
+            "Python / FastAPI": ["python", "fastapi", "django", "flask"],
+            "Tailwind CSS / UI": ["tailwind", "css", "html", "gsap", "sass", "responsive", "frontend"],
+            "Docker & Linux": ["docker", "linux", "vps", "git", "ci/cd", "nginx"],
+            "REST APIs & Arquitectura": ["rest", "restful", "api", "apis", "microservices", "clean architecture"],
+        }
+
+        matched_skills: list[str] = []
+        for name, keywords in stack_map.items():
+            if any(re.search(rf"\b{re.escape(kw)}\b", full_text) for kw in keywords):
+                matched_skills.append(name)
+
+        secondary_map = {
+            "AWS / Cloud": ["aws", "amazon web services", "cloudformation", "terraform"],
+            "GCP / Azure": ["gcp", "google cloud", "azure"],
+            "Kubernetes": ["kubernetes", "k8s"],
+            "Java / Spring": ["java", "spring boot", "spring"],
+            "C# / .NET": ["c#", ".net", "dotnet"],
+            "PHP / Laravel": ["php", "laravel", "symfony"],
+            "Ruby / Rails": ["ruby", "rails"],
+            "Go / Golang": ["golang", "go"],
+            "Angular": ["angular"],
+            "Mobile Nativo": ["swift", "kotlin", "android studio", "objective-c"],
+        }
+
+        missing_skills: list[str] = []
+        for name, keywords in secondary_map.items():
+            if any(re.search(rf"\b{re.escape(kw)}\b", full_text) for kw in keywords):
+                missing_skills.append(name)
+
+        is_incompatible_geo = False
+        if any(w in full_text for w in ["caba presencial", "cordoba presencial", "presencial diario en madrid", "w-2 only", "green card required", "us citizenship required", "polygraph"]):
+            is_incompatible_geo = True
+
+        base_score = 72
+        base_score += min(len(matched_skills) * 4, 20)
+
+        is_remote = "remoto: true" in prompt.lower() or "remote" in full_text or "remoto" in full_text
+        if is_remote:
+            base_score += 5
+
+        if any(w in full_text for w in ["argentina", "latam", "latin america", "utc-3", "neuquén", "rio negro"]):
+            base_score += 3
+
+        if missing_skills:
+            base_score -= min(len(missing_skills) * 4, 16)
+
+        if is_incompatible_geo:
+            base_score = 20
+
+        score = max(15, min(95, base_score))
+
+        if is_incompatible_geo:
+            verdict = "DESCARTAR"
+        elif score >= 85:
+            verdict = "EXCELENTE_MATCH"
+        elif score >= 72:
+            verdict = "BUEN_MATCH"
+        elif score >= 50:
+            verdict = "REGULAR"
+        else:
+            verdict = "DESCARTAR"
+
+        matching_projects: list[str] = []
+        if any("vue" in s.lower() or "tailwind" in s.lower() for s in matched_skills):
+            matching_projects.append("La Rúcula")
+        if any("python" in s.lower() for s in matched_skills):
+            matching_projects.append("Ynara")
+            matching_projects.append("Eros Agent")
+        if not matching_projects or any("node" in s.lower() or "typescript" in s.lower() or "sql" in s.lower() for s in matched_skills):
+            matching_projects.append("Portafolio (mateogs.tech)")
+            if "Ynara" not in matching_projects:
+                matching_projects.append("Ynara")
+            if "ARG Piscinas" not in matching_projects and len(matching_projects) < 3:
+                matching_projects.append("ARG Piscinas")
+
+        pros = []
+        if matched_skills:
+            pros.append(f"Alineación técnica en stack central: {', '.join(matched_skills[:3])}")
+        else:
+            pros.append("Alineación con desarrollo web y buenas prácticas de ingeniería")
+        if is_remote:
+            pros.append("Modalidad remota compatible con disponibilidad horaria completa (UTC-3)")
+        pros.append("Experiencia comprobada en producción con arquitectura desacoplada y rendimiento web")
+
+        cons = []
+        if is_incompatible_geo:
+            cons.append("Incompatibilidad geográfica o legal estricta con la vacante")
+        elif missing_skills:
+            cons.append(f"Validar requisitos secundarios o de infraestructura: {', '.join(missing_skills[:3])}")
+        else:
+            cons.append("Validar procesos específicos de CI/CD e integraciones internas del equipo")
+
+        matched_str = ", ".join(matched_skills[:4]) if matched_skills else "desarrollo Full Stack y APIs REST"
+        summary = (
+            f"La vacante para el puesto de {title} en {company} presenta un nivel de compatibilidad del {score}% con el perfil de Mateo. "
+            f"El rol requiere competencias en {matched_str}, áreas donde Mateo cuenta con experiencia sólida construyendo software de extremo a extremo. "
+            f"Su experiencia en producción con Express 5, PostgreSQL 17, TypeScript y frontend reactivo en Vue 3 y React "
+            f"le permite integrarse con rapidez y autonomía operativa. "
+            f"Proyectos en vivo como Portafolio (mateogs.tech) y Ynara validan directamente la calidad y solidez técnica requerida."
+        )
+
+        recruiter_note = (
+            f"Hola, vi la búsqueda de {title} en {company}. Me especializo en Vue/Nuxt, Node y TypeScript con proyectos en producción (mateogs.tech). "
+            f"Me gustaría conectar y conversar sobre cómo aportar al equipo."
+        )
+        if len(recruiter_note) > 280:
+            recruiter_note = recruiter_note[:277] + "..."
+
+        result = {
+            "score": score,
+            "verdict": verdict,
+            "summary": summary,
+            "pros": pros,
+            "cons": cons,
+            "missing_skills": missing_skills[:4],
+            "matching_projects": matching_projects[:3],
+            "salary_estimate": salary or "No especificado en la vacante",
+            "hiring_manager_name": None,
+            "hiring_manager_title": None,
+            "recruiter_note": recruiter_note,
+        }
+        return json.dumps(result, ensure_ascii=False)
 
     def _heuristic_fallback(self, prompt: str) -> str:
         """Fallback cuando la API externa no está disponible o tiene spike de demanda."""
@@ -138,7 +299,7 @@ class LLMClient:
                     "Quedo a disposición para conversar sobre cómo aportar al equipo."
                 ),
                 "cover_letter": "Disponible a solicitud.",
-                "suggested_projects": ["Portafolio Dos Mundos", "La Rúcula", "Ynara"]
+                "suggested_projects": ["Portafolio (mateogs.tech)", "La Rúcula", "Ynara"]
             })
 
         # Si se esperaba JSON de contenido técnico:
@@ -167,18 +328,10 @@ class LLMClient:
                 ]
             })
 
-        # Si se esperaba JSON de matching:
-        if "JSON" in prompt:
-            return json.dumps({
-                "score": 80,
-                "verdict": "BUEN_MATCH",
-                "summary": "Coincidencia evaluada con motor heurístico local.",
-                "pros": ["Puesto de desarrollo web/frontend", "Modalidad remota compatible con huso horario"],
-                "cons": ["Requiere verificación manual de requisitos secundarios"],
-                "missing_skills": [],
-                "matching_projects": ["La Rúcula", "Ynara", "Portafolio Dos Mundos"]
-            })
-        
+        # Si se esperaba evaluación de vacante / matching laboral:
+        if "EVALUÁ ESTA OFERTA LABORAL" in prompt or "score" in prompt or "verdict" in prompt or "JSON" in prompt:
+            return self._heuristic_evaluate_job(prompt)
+
         return "Hola! Soy Eros Agent. He evaluado la posición. Cumple con el stack de desarrollo frontend y arquitectura web."
 
     async def embed_text(self, text: str) -> list[float]:

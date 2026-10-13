@@ -83,5 +83,5 @@ Devolve exclusivamente el objeto JSON con la propuesta.
                     f"Quedo a disposición para conversar. Saludos,\nMateo Sonzogni"
                 ),
                 cover_letter="Disponible previa solicitud.",
-                suggested_projects=["Portafolio Dos Mundos", "La Rúcula"]
+                suggested_projects=["Portafolio (mateogs.tech)", "La Rúcula"]
             )

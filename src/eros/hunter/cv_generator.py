@@ -20,7 +20,7 @@ Tu objetivo es tomar los datos reales de Mateo Gabriel Sonzogni y adaptarlos con
 REGLAS DE ORO:
 1. NADA DE INVENTAR EXPERIENCIA FALSA: Mateo tiene proyectos reales en producción:
    - "Ynara AI Assistant": Tesis de grado Escuela Da Vinci, inferencia on-premise, Next.js, FastAPI, PostgreSQL, pgvector, latencia sub-100ms, 382 commits.
-   - "Portafolio Dos Mundos": Plataforma Full Stack con backend desacoplado (Express 5, Prisma ORM, PostgreSQL 17) sirviendo API pública y panel admin con tokens seguros, y frontend Nuxt 4 con renderers gemelos DATOS y DISEÑO.
+   - "Portafolio de Mateo (mateogs.tech)": Plataforma Full Stack con backend desacoplado (Express 5, Prisma ORM, PostgreSQL 17) sirviendo API pública y panel admin con autenticación segura, y frontend Nuxt 4 de alto rendimiento y arquitectura relacional.
    - "ARG Piscinas": Web corporativa multi-idioma (ES/EN/DE) con panel admin en producción para cliente en Andalucía (España), Node.js, Prisma ORM, TypeScript, Vue 3.
    - "La Rúcula Gastrobar": Sitio editorial en producción para cliente en Cádiz (España), Vue 3, Vite, Tailwind CSS, GSAP, Lenis, Lighthouse 99 Performance / 100 SEO, menú QR con offline cache fallback.
    - "Eros Agent": Agente autónomo de prospección y reclutamiento con LLMs (Gemini Flash), scrapers multi-fuente asíncronos, FastAPI y SQLite.
@@ -38,7 +38,7 @@ REGLAS DE ORO:
    - Sección de Metodologías & Buenas Prácticas: Clean Architecture, Principios SOLID, Git Flow & CI/CD, Docker, Metodologías Ágiles (Scrum).
 
 3. ADAPTACIÓN AL ROL:
-   - Resaltá y ordená los proyectos y tecnologías que la oferta exige. Si piden Python/Backend/FastAPI, priorizá Ynara, Portafolio Dos Mundos y Eros Agent. Si piden Full Stack, balanceá Node.js, Vue y Next.js.
+   - Resaltá y ordená los proyectos y tecnologías que la oferta exige. Si piden Python/Backend/FastAPI, priorizá Ynara, Portafolio de Mateo (mateogs.tech) y Eros Agent. Si piden Full Stack, balanceá Node.js, Vue y Next.js.
    - Si la oferta está en inglés, TODO el CV debe redactarse en INGLÉS técnico y profesional.
    - Si la oferta está en español, TODO el CV debe redactarse en ESPAÑOL rioplatense neutro.
 
@@ -268,14 +268,14 @@ Generá el JSON del CV adaptado siguiendo estrictamente las instrucciones del si
                     tech_stack=["Python", "FastAPI", "PostgreSQL", "pgvector", "TypeScript", "Next.js"],
                 ),
                 CVProject(
-                    title="Portafolio Dos Mundos",
+                    title="Portafolio de Mateo (mateogs.tech)",
                     role="Full Stack Software Engineer",
                     period="2025 – 2026",
                     location="Argentina (Remote)",
                     bullets=[
                         "Engineered decoupled web platform serving high-speed public API and secure token-authenticated reactive admin panel with Express 5.",
                         "Designed robust database schema using PostgreSQL 17 and Prisma ORM, implementing relational constraints and connection pooling.",
-                        "Built twin interactive renderers in Nuxt 4 with custom reactive state management and sub-second page transitions.",
+                        "Built reactive modern interface in Nuxt 4 with custom state management and sub-second page transitions.",
                     ],
                     tech_stack=["Node.js", "Express 5", "PostgreSQL 17", "Prisma ORM", "Nuxt 4", "Docker"],
                 ),
@@ -350,14 +350,14 @@ Generá el JSON del CV adaptado siguiendo estrictamente las instrucciones del si
                     tech_stack=["Python", "FastAPI", "PostgreSQL", "pgvector", "TypeScript", "Next.js"],
                 ),
                 CVProject(
-                    title="Portafolio Dos Mundos",
+                    title="Portafolio de Mateo (mateogs.tech)",
                     role="Full Stack Software Engineer",
                     period="2025 – 2026",
                     location="Argentina (Remote)",
                     bullets=[
                         "Diseñó una arquitectura desacoplada con Express 5 sirviendo una API pública de alta velocidad y un panel admin seguro con token.",
                         "Modeló la base de datos relacional con PostgreSQL 17 y Prisma ORM, asegurando tipado estricto end-to-end e integridad transaccional.",
-                        "Desarrolló frontend gemelo interactivo con Nuxt 4, logrando transiciones fluidas y gestión reactiva de estado sin sobrecarga.",
+                        "Desarrolló frontend interactivo de alta fidelidad con Nuxt 4, logrando transiciones fluidas y gestión reactiva de estado sin sobrecarga.",
                     ],
                     tech_stack=["Node.js", "Express 5", "PostgreSQL 17", "Prisma ORM", "Nuxt 4", "Docker"],
                 ),

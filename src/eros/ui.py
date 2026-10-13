@@ -685,7 +685,7 @@ HTML_DASHBOARD = r"""<!DOCTYPE html>
 
             <div class="space-y-1">
               <label class="block text-xs font-medium text-zinc-300">Proyecto Relacionado (opcional):</label>
-              <input type="text" v-model="newPostForm.projectName" placeholder="Ej: Portafolio Dos Mundos / Eros Career OS"
+              <input type="text" v-model="newPostForm.projectName" placeholder="Ej: Portafolio (mateogs.tech) / Eros Career OS"
                      class="w-full bg-[#16171b] border border-white/10 rounded px-3 py-2 text-xs text-white focus:outline-none focus:border-[#ff3e00]">
             </div>
 
