@@ -1,6 +1,7 @@
 import json
 import logging
 import re
+import time
 from typing import Any
 import httpx
 from eros.config import get_settings
@@ -8,11 +9,17 @@ from eros.config import get_settings
 logger = logging.getLogger(__name__)
 
 
+class GeminiQuotaExceededError(RuntimeError):
+    """Excepción cuando se agota la cuota diaria o por minuto de Google Gemini."""
+    pass
+
+
 class LLMClient:
     """Cliente unificado y asíncrono para Gemini y Claude con soporte para cascada de modelos y fallback inteligente."""
 
     def __init__(self):
         self.settings = get_settings()
+        self._quota_exhausted_until: float = 0.0
 
     async def generate(
         self,
@@ -31,6 +38,11 @@ class LLMClient:
                 logger.error(f"Error llamando a Claude API: {e}. Intentando fallback con Gemini...")
 
         if self.settings.gemini_api_key:
+            # Si estamos en ventana de cooldown por cuota agotada de Gemini, usar fallback heurístico de inmediato
+            if time.time() < self._quota_exhausted_until:
+                logger.info("Cuota de Gemini en ventana de cooldown. Usando evaluador heurístico inteligente inmediato...")
+                return self._heuristic_fallback(prompt)
+
             models_to_try: list[str] = [self.settings.gemini_model]
             fallback_models = getattr(self.settings, "gemini_fallback_models", [])
             for m in fallback_models:
@@ -47,7 +59,22 @@ class LLMClient:
                         json_mode=json_mode,
                         max_tokens=max_tokens,
                     )
+                except GeminiQuotaExceededError as e:
+                    logger.warning(
+                        f"Cuota diaria/por minuto de Gemini agotada en '{model_name}': {e}. "
+                        "Activando cooldown de 5 minutos y fallback heurístico inmediato..."
+                    )
+                    self._quota_exhausted_until = time.time() + 300.0
+                    return self._heuristic_fallback(prompt)
                 except Exception as e:
+                    err_msg = str(e)
+                    if "429" in err_msg or "RESOURCE_EXHAUSTED" in err_msg or "QuotaFailure" in err_msg:
+                        logger.warning(
+                            f"Detectado límite de cuota en Gemini '{model_name}': {err_msg[:200]}. "
+                            "Activando cooldown y fallback heurístico inmediato..."
+                        )
+                        self._quota_exhausted_until = time.time() + 300.0
+                        return self._heuristic_fallback(prompt)
                     logger.warning(f"Falla con modelo Gemini '{model_name}': {e}. Probando siguiente modelo de la cascada...")
 
             logger.error("Todos los modelos de Gemini fallaron o experimentan alta demanda. Activando evaluador heurístico inteligente...")
@@ -87,11 +114,14 @@ class LLMClient:
                 "parts": [{"text": system_prompt}]
             }
 
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=12.0) as client:
             resp = await client.post(url, json=payload)
             if resp.status_code != 200:
-                logger.error(f"Gemini API ({active_model}) returned status {resp.status_code}: {resp.text}")
-                raise RuntimeError(f"Gemini API ({active_model}) returned status {resp.status_code}: {resp.text}")
+                resp_text = resp.text
+                if resp.status_code == 429 or "RESOURCE_EXHAUSTED" in resp_text or "QuotaFailure" in resp_text:
+                    raise GeminiQuotaExceededError(f"HTTP {resp.status_code} RESOURCE_EXHAUSTED: {resp_text[:300]}")
+                logger.error(f"Gemini API ({active_model}) returned status {resp.status_code}: {resp_text[:300]}")
+                raise RuntimeError(f"Gemini API ({active_model}) returned status {resp.status_code}: {resp_text[:300]}")
 
             data = resp.json()
             candidates = data.get("candidates", [])
@@ -349,10 +379,10 @@ class LLMClient:
             }
         }
 
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.post(url, json=payload)
             if resp.status_code != 200:
-                logger.error(f"Gemini Embedding API error HTTP {resp.status_code}: {resp.text}")
+                logger.error(f"Gemini Embedding API error HTTP {resp.status_code}: {resp.text[:200]}")
                 return []
             data = resp.json()
             return data.get("embedding", {}).get("values", [])
@@ -381,12 +411,15 @@ class LLMClient:
                 for t in chunk
             ]
             try:
-                async with httpx.AsyncClient(timeout=45.0) as client:
+                async with httpx.AsyncClient(timeout=15.0) as client:
                     resp = await client.post(url, json={"requests": requests})
                     if resp.status_code == 200:
                         data = resp.json()
                         embeddings = [e.get("values", []) for e in data.get("embeddings", [])]
                         all_embeddings.extend(embeddings)
+                    elif resp.status_code == 429 or "RESOURCE_EXHAUSTED" in resp.text:
+                        logger.warning("Batch embedding de Gemini agotó cuota (429). Omitiendo reintentos individuales...")
+                        all_embeddings.extend([[] for _ in chunk])
                     else:
                         logger.warning(f"Batch embedding falló con HTTP {resp.status_code}. Pasando a uno a uno...")
                         for t in chunk:
@@ -394,8 +427,6 @@ class LLMClient:
                             all_embeddings.append(emb)
             except Exception as e:
                 logger.error(f"Excepción en batch embed: {e}")
-                for t in chunk:
-                    emb = await self.embed_text(t)
-                    all_embeddings.append(emb)
+                all_embeddings.extend([[] for _ in chunk])
 
         return all_embeddings

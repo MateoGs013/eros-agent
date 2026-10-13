@@ -380,25 +380,34 @@ async def trigger_vectorize(limit: int = 100):
 
 
 @app.post("/api/scan", dependencies=[Depends(verify_auth)])
-async def trigger_scan(evaluate: bool | None = None):
-    """Dispara un escaneo en vivo en todas las fuentes habilitadas."""
+async def trigger_scan(evaluate: bool = False, background_eval: bool = False):
+    """Dispara un escaneo en vivo en todas las fuentes habilitadas.
+
+    Por defecto se desacopla la evaluación con IA (evaluate=False) para responder
+    de inmediato (~10-15s) y evitar errores de timeout 503/500 en proxies inversos.
+    """
     scan_res = await engine.run_scan()
     eval_res = []
-
-    if evaluate is None:
-        auto_eval_str = await engine.storage.get_setting("auto_evaluate", "1")
-        evaluate = (auto_eval_str == "1")
+    evaluating_in_background = False
 
     if evaluate:
         eval_limit_str = await engine.storage.get_setting("eval_limit", "15")
         limit = int(eval_limit_str) if (eval_limit_str and eval_limit_str.isdigit()) else 15
         eval_res = await engine.evaluate_pending_jobs(limit=limit)
+    elif background_eval:
+        auto_eval_str = await engine.storage.get_setting("auto_evaluate", "0")
+        if auto_eval_str == "1":
+            eval_limit_str = await engine.storage.get_setting("eval_limit", "15")
+            limit = int(eval_limit_str) if (eval_limit_str and eval_limit_str.isdigit()) else 15
+            asyncio.create_task(engine.evaluate_pending_jobs(limit=limit))
+            evaluating_in_background = True
 
     return {
         "ok": True,
         "scanned": scan_res["total_found"],
         "new_jobs": scan_res["new_jobs"],
-        "evaluated_count": len(eval_res)
+        "evaluated_count": len(eval_res),
+        "evaluating_in_background": evaluating_in_background,
     }
 
 
