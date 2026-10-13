@@ -26,6 +26,14 @@ from eros.content.generator import ContentGenerator
 from eros.content.carousel import CarouselRenderer
 from eros.content.dispatcher import ContentDispatcher
 from eros.bot.telegram import TelegramBot
+from eros.radar.models import (
+    TrendGenerateRequest,
+    TrendItem,
+    TrendScanResponse,
+    TrendStatus,
+)
+from eros.radar.storage import RadarStorage
+from eros.radar.engine import RadarEngine
 
 logger = logging.getLogger("eros.api")
 
@@ -35,6 +43,8 @@ content_storage = ContentStorage()
 content_generator = ContentGenerator(storage=content_storage, engine=engine)
 content_dispatcher = ContentDispatcher(storage=content_storage)
 telegram_bot = TelegramBot(engine=engine)
+radar_storage = RadarStorage()
+radar_engine = RadarEngine(storage=radar_storage)
 
 
 @asynccontextmanager
@@ -42,7 +52,8 @@ async def lifespan(app: FastAPI):
     # Inicializar base de datos y sincronizar perfil inicial
     await engine.initialize()
     await content_storage.init_db()
-    logger.info("Eros Hunter API y Content Engine inicializados.")
+    await radar_storage.init_db()
+    logger.info("Eros Hunter API, Content Engine y TrendRadar inicializados.")
 
     bot_task = None
     if telegram_bot.is_configured:
@@ -557,4 +568,82 @@ async def n8n_callback(payload: dict[str, Any]):
             n8n_response=json.dumps(payload.get("details", payload))
         )
     return {"ok": True, "received": True}
+
+
+# ---------------------------------------------------------------------------
+# TrendRadar Endpoints (Eros Radar de Tendencias Técnicas)
+# ---------------------------------------------------------------------------
+
+@app.post("/api/radar/scan", dependencies=[Depends(verify_auth)], response_model=TrendScanResponse)
+async def scan_radar(limit: int = 15):
+    """Escanea Hacker News, Dev.to y GitHub en busca de tendencias técnicas de alta relevancia."""
+    trends = await radar_engine.scan(limit_per_source=limit)
+    return TrendScanResponse(
+        total_found=len(trends),
+        new_trends=len(trends),
+        trends=trends,
+    )
+
+
+@app.get("/api/radar/trends", dependencies=[Depends(verify_auth)], response_model=list[TrendItem])
+async def get_radar_trends(
+    status: TrendStatus | None = None,
+    min_score: int | None = None,
+    limit: int = 50,
+):
+    """Devuelve las tendencias detectadas por TrendRadar ordenadas por relevancia técnica."""
+    return await radar_storage.get_trends(status=status, min_score=min_score, limit=limit)
+
+
+@app.get("/api/radar/trends/{trend_id}", dependencies=[Depends(verify_auth)], response_model=TrendItem)
+async def get_radar_trend(trend_id: str):
+    trend = await radar_storage.get_trend(trend_id)
+    if not trend:
+        raise HTTPException(status_code=404, detail="Tendencia no encontrada")
+    return trend
+
+
+@app.patch("/api/radar/trends/{trend_id}/status", dependencies=[Depends(verify_auth)])
+async def update_radar_trend_status(trend_id: str, payload: dict[str, Any]):
+    new_status = payload.get("status")
+    if not new_status:
+        raise HTTPException(status_code=400, detail="El campo 'status' es obligatorio")
+    try:
+        ts = TrendStatus(new_status)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Estado inválido: {new_status}")
+    ok = await radar_storage.update_status(trend_id, ts)
+    return {"ok": ok, "id": trend_id, "status": ts.value}
+
+
+@app.post("/api/radar/trends/{trend_id}/generate", dependencies=[Depends(verify_auth)])
+async def generate_post_from_trend(trend_id: str, payload: TrendGenerateRequest | None = None):
+    """Genera una publicación omnicanal completa a partir de una tendencia detectada."""
+    trend = await radar_storage.get_trend(trend_id)
+    if not trend:
+        raise HTTPException(status_code=404, detail="Tendencia no encontrada")
+
+    req = payload or TrendGenerateRequest()
+    pillar_val = req.pillar or "TECHNICAL_BREAKDOWN"
+    angle = req.custom_angle or trend.engineering_angle
+
+    gen_req = ContentGenerateRequest(
+        topic=trend.title,
+        key_points=[
+            f"Referencia original: {trend.url}",
+            f"Síntesis: {trend.summary}",
+            f"Ángulo de ingeniería: {angle}",
+        ],
+        project_slug=req.project_slug,
+        pillar=pillar_val,  # type: ignore
+    )
+
+    post = await content_generator.generate(gen_req)
+    await radar_storage.update_status(trend_id, TrendStatus.GENERATED, post_id=post.id)
+    return {
+        "ok": True,
+        "trend_id": trend_id,
+        "post": post.model_dump(),
+    }
+
 
