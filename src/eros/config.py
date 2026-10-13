@@ -36,7 +36,13 @@ class Settings(BaseSettings):
 
     # LLM Providers
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-flash-lite-latest"
+    gemini_model: str = "gemini-3.5-flash"
+    gemini_fallback_models: list[str] = [
+        "gemini-3.5-flash",
+        "gemini-3.6-flash",
+        "gemini-3.7-flash",
+        "gemini-3.8-flash",
+    ]
     anthropic_api_key: str = ""
 
     # n8n Automation Webhook

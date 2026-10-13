@@ -82,7 +82,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const items = $input.all();\nconst messages = items.map(i => i.json.commit?.message || '').filter(m => m.length > 5);\nconst keyPoints = messages.slice(0, 4).map(m => m.split('\\n')[0]);\n\nreturn [{\n  json: {\n    topic: 'Arquitectura y optimizaciones recientes en mateogs.tech',\n    key_points: keyPoints.length > 0 ? keyPoints : ['Optimizacion de rendimiento frontend', 'Tipado estricto con TypeScript', 'Despliegue continuo en VPS'],\n    project_name: 'Portafolio Dos Mundos'\n  }\n}];"
+        "jsCode": "const items = $input.all();\nconst messages = items.map(i => i.json.commit?.message || '').filter(m => m.length > 5);\nconst keyPoints = messages.slice(0, 4).map(m => m.split('\\n')[0]);\n\nreturn [{\n  json: {\n    topic: 'Arquitectura y optimizaciones recientes en mateogs.tech',\n    key_points: keyPoints.length > 0 ? keyPoints : ['Optimizacion de rendimiento frontend', 'Tipado estricto con TypeScript', 'Despliegue continuo en VPS'],\n    project_name: 'Portafolio (mateogs.tech)'\n  }\n}];"
       },
       "id": "extract-commit-insights",
       "name": "Code: Formatear Insights",

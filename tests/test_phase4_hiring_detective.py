@@ -28,7 +28,7 @@ class TestPhase4HiringDetective(unittest.IsolatedAsyncioTestCase):
             role="Full Stack & Creative Engineer",
             tech_stack=["Vue 3", "Nuxt 3", "TypeScript", "Node.js", "Tailwind CSS", "PostgreSQL"],
             projects=[
-                ProjectSummary(slug="dos-mundos", title="Portafolio Dos Mundos", summary="Web con Three.js y Nuxt", techs=["Nuxt", "Vue", "Three.js"]),
+                ProjectSummary(slug="dos-mundos", title="Portafolio (mateogs.tech)", summary="Web con Three.js y Nuxt", techs=["Nuxt", "Vue", "Three.js"]),
                 ProjectSummary(slug="eros-os", title="Eros Career OS", summary="Agente autónomo de carrera", techs=["Python", "FastAPI"])
             ],
             languages="Inglés C1 / Español Nativo",
@@ -161,7 +161,7 @@ class TestPhase4HiringDetective(unittest.IsolatedAsyncioTestCase):
             "pros": ["Stack 100% compatible", "Remoto LATAM"],
             "cons": [],
             "missing_skills": [],
-            "matching_projects": ["Portafolio Dos Mundos"],
+            "matching_projects": ["Portafolio (mateogs.tech)"],
             "salary_estimate": "USD 3,500 - 4,500 / mes",
             "hiring_manager_name": "Valeria Lynch",
             "hiring_manager_title": "Head of Talent",
@@ -234,7 +234,7 @@ class TestPhase4HiringDetective(unittest.IsolatedAsyncioTestCase):
             "pros": ["Vue 3", "Nuxt 3"],
             "cons": [],
             "missing_skills": [],
-            "matching_projects": ["Portafolio Dos Mundos"],
+            "matching_projects": ["Portafolio (mateogs.tech)"],
             "salary_estimate": "USD 3,000 / mes",
             "hiring_manager_name": "Lucía Morales",
             "hiring_manager_title": "Engineering Recruiter",

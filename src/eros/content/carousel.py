@@ -4,7 +4,7 @@ from eros.content.models import ContentPost, SlideItem
 
 
 class CarouselRenderer:
-    """Renderizador de Carousels con la identidad técnica oficial 'Mundo DATOS' de Mateo Sonzogni."""
+    """Renderizador de Carousels con la identidad visual y técnica de Mateo Sonzogni (mateogs.tech)."""
 
     @staticmethod
     def render_html(post: ContentPost, auto_print: bool = False) -> str:
@@ -62,7 +62,7 @@ class CarouselRenderer:
                             <span class="brand-logo">M</span>
                             <div class="brand-info">
                                 <span class="brand-name">MATEO SONZOGNI</span>
-                                <span class="brand-sub">MATEOGS.TECH // DATOS</span>
+                                <span class="brand-sub">MATEOGS.TECH</span>
                             </div>
                         </div>
                         <div class="slide-counter">
@@ -110,7 +110,7 @@ class CarouselRenderer:
     <link href="https://fonts.googleapis.com/css2?family=Martian+Mono:wght@400;500;600;700;800&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
         :root {{
-            /* Tokens oficiales de Mundo DATOS (mateogs.tech) */
+            /* Tokens visuales oficiales de mateogs.tech */
             --d-paper: #09090b;
             --d-surface: #121215;
             --d-surface-raised: #19191e;

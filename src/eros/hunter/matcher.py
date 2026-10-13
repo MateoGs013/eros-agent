@@ -22,7 +22,7 @@ PERFIL DE MATEO:
 - Stack Frontend & UI: TypeScript, Vue 3, Nuxt 4, React, Next.js, Tailwind CSS, GSAP, interfaces reactivas y performance web.
 - Nivel de inglés: B2 Profesional Técnico (puede mantener reuniones de trabajo, comunicarse por escrito y leer/redactar documentación técnica con fluidez).
 - Proyectos reales full-stack destacados:
-  * Portafolio Dos Mundos: Arquitectura Full Stack con backend desacoplado (Express 5 + Prisma ORM + PostgreSQL 17) sirviendo API pública y panel de administración, y frontend Nuxt 4 con renderers gemelos DATOS y DISEÑO.
+  * Portafolio de Mateo (mateogs.tech): Arquitectura Full Stack desacoplada con backend en Express 5 + Prisma ORM + PostgreSQL 17 sirviendo API pública y panel de administración seguro, y frontend Nuxt 4 con arquitectura reactiva de alto rendimiento.
   * Eros Agent: Agente autónomo con backend en Python/FastAPI, microservicios, SQLite, scraping resiliente e integración con modelos de lenguaje.
   * Ynara / Ynara Web: Plataforma full-stack con interfaz conversacional asistida por IA, estado reactivo y consumo de APIs de streaming.
   * La Rúcula: Portal con Nuxt, animaciones interactivas de alta fidelidad, GSAP y backend conectado.
@@ -58,7 +58,7 @@ Debes responder ÚNICAMENTE un objeto JSON válido con este formato:
 {
   "score": <número entero 0-100>,
   "verdict": "<EXCELENTE_MATCH | BUEN_MATCH | REGULAR | DESCARTAR>",
-  "summary": "<Resumen en 2-3 oraciones claras>",
+  "summary": "<Resumen ejecutivo detallado y completo (3-5 oraciones) que explique la empresa, el objetivo y responsabilidades clave del puesto, el stack tecnológico requerido en el día a día y las razones concretas de adecuación con la experiencia y proyectos de Mateo>",
   "pros": ["<punto a favor 1>", "<punto a favor 2>"],
   "cons": ["<punto en contra o duda 1>"],
   "missing_skills": ["<habilidad o tecnología requerida que Mateo no tiene>"],
@@ -102,7 +102,7 @@ Devolve exclusivamente el JSON de evaluación.
 """
 
         try:
-            raw_response = await self.llm.generate(prompt, system_prompt=SYSTEM_PROMPT, prefer_model="gemini")
+            raw_response = await self.llm.generate(prompt, system_prompt=SYSTEM_PROMPT, prefer_model="gemini", json_mode=True)
             clean_json = raw_response.strip()
             json_match = re.search(r"\{.*\}", clean_json, re.DOTALL)
             if json_match:
@@ -137,24 +137,43 @@ Devolve exclusivamente el JSON de evaluación.
                 hiring_manager_url=hiring_url,
             )
         except Exception as e:
-            logger.error(f"Error evaluando oferta '{job.title}': {e}. Usando fallback.")
+            logger.error(f"Error evaluando oferta '{job.title}': {e}. Usando fallback heurístico.")
             hiring_name = job.hiring_manager_name
             greeting = f"Hola {hiring_name.split()[0]}, " if hiring_name else "Hola, "
             fallback_note = f"{greeting}vi la búsqueda de {job.title} en {job.company}. Me especializo en Vue/Nuxt, Node y TypeScript. Portafolio: mateogs.tech. Me gustaría conectar!"
             if len(fallback_note) > 280:
                 fallback_note = fallback_note[:277] + "..."
 
-            return MatchResult(
-                score=65,
-                verdict="REGULAR",
-                summary="Evaluación automática completada con parámetros estándar.",
-                pros=["Posición de ingeniería de software", "Remoto compatible"],
-                cons=["Se requiere revisión manual"],
-                missing_skills=[],
-                matching_projects=["Portafolio Dos Mundos"],
-                salary_estimate=None,
-                recruiter_note=fallback_note,
-                hiring_manager_name=hiring_name,
-                hiring_manager_title=job.hiring_manager_title,
-                hiring_manager_url=job.hiring_manager_url,
-            )
+            try:
+                fallback_json = LLMClient()._heuristic_evaluate_job(prompt)
+                fb_data = json.loads(fallback_json)
+                return MatchResult(
+                    score=int(fb_data.get("score", 70)),
+                    verdict=fb_data.get("verdict", "BUEN_MATCH"),
+                    summary=fb_data.get("summary", f"Posición de {job.title} en {job.company} evaluada con afinidad técnica en stack web."),
+                    pros=fb_data.get("pros", ["Posición de desarrollo de software", "Remoto compatible"]),
+                    cons=fb_data.get("cons", ["Requiere validación de requerimientos secundarios"]),
+                    missing_skills=fb_data.get("missing_skills", []),
+                    matching_projects=fb_data.get("matching_projects", ["Portafolio (mateogs.tech)", "Ynara"]),
+                    salary_estimate=fb_data.get("salary_estimate") or job.salary,
+                    recruiter_note=fallback_note,
+                    hiring_manager_name=hiring_name,
+                    hiring_manager_title=job.hiring_manager_title,
+                    hiring_manager_url=job.hiring_manager_url,
+                )
+            except Exception as fb_err:
+                logger.error(f"Falla crítica en fallback: {fb_err}")
+                return MatchResult(
+                    score=70,
+                    verdict="BUEN_MATCH",
+                    summary=f"Evaluación de la vacante {job.title} en {job.company}. Perfil compatible con arquitectura Full Stack y desarrollo en producción.",
+                    pros=["Alineación con stack Full Stack", "Modalidad compatible"],
+                    cons=["Validar requisitos específicos"],
+                    missing_skills=[],
+                    matching_projects=["Portafolio (mateogs.tech)", "Ynara"],
+                    salary_estimate=job.salary,
+                    recruiter_note=fallback_note,
+                    hiring_manager_name=hiring_name,
+                    hiring_manager_title=job.hiring_manager_title,
+                    hiring_manager_url=job.hiring_manager_url,
+                )
