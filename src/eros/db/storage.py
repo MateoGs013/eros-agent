@@ -245,6 +245,13 @@ class JobStorage:
             await db.commit()
             return cursor.rowcount
 
+    async def delete_all_jobs(self) -> int:
+        """Elimina físicamente todas las vacantes escaneadas de la base de datos."""
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute("DELETE FROM jobs")
+            await db.commit()
+            return cursor.rowcount
+
     async def save_profile_cache(self, profile: ProfileContext) -> None:
         """Guarda el perfil de Mateo en caché local."""
         async with aiosqlite.connect(self.db_path) as db:

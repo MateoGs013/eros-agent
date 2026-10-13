@@ -471,6 +471,23 @@ async def update_job_status(job_id: str, body: StatusUpdateRequest):
     return {"ok": True, "job_id": job_id, "new_status": body.status}
 
 
+@app.delete("/api/jobs", dependencies=[Depends(verify_auth)])
+async def delete_all_jobs():
+    """Elimina todas las vacantes escaneadas para empezar desde cero."""
+    deleted = await engine.clear_all_jobs()
+    return {"ok": True, "deleted_count": deleted}
+
+
+@app.delete("/api/jobs/{job_id}", dependencies=[Depends(verify_auth)])
+async def delete_single_job(job_id: str):
+    """Elimina una vacante específica por ID."""
+    job = await engine.storage.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Oferta no encontrada")
+    await engine.storage.delete_job(job_id)
+    return {"ok": True, "deleted_id": job_id}
+
+
 @app.post("/api/profile/sync", dependencies=[Depends(verify_auth)])
 async def sync_profile():
     """Fuerza la sincronización del perfil desde la API del portafolio."""
