@@ -159,6 +159,10 @@ HTML_DASHBOARD = r"""<!DOCTYPE html>
                       class="px-3.5 py-2 rounded bg-white/10 hover:bg-white/15 text-white font-medium text-xs font-mono-code transition-colors disabled:opacity-50">
                 Purgar Incompatibles
               </button>
+              <button @click="clearAllJobs()" :disabled="actionLoading"
+                      class="px-3.5 py-2 rounded bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 font-medium text-xs font-mono-code transition-colors disabled:opacity-50">
+                Vaciar Vacantes
+              </button>
               <button @click="triggerAction('sync')" :disabled="actionLoading"
                       class="px-3.5 py-2 rounded bg-white/10 hover:bg-white/15 text-white font-medium text-xs font-mono-code transition-colors disabled:opacity-50">
                 Sincronizar Perfil
@@ -1039,6 +1043,25 @@ HTML_DASHBOARD = r"""<!DOCTYPE html>
           }
         }
 
+        async function clearAllJobs() {
+          if (!confirm('¿Estás seguro de que deseas eliminar todas las vacantes escaneadas para empezar desde cero?')) return
+          actionLoading.value = true
+          try {
+            const res = await fetch('/api/jobs', { method: 'DELETE', headers: authHeaders() })
+            if (res.ok) {
+              const data = await res.json()
+              showToast(`Se eliminaron ${data.deleted_count ?? 0} vacantes`)
+              loadData()
+            } else {
+              showToast('Error al vaciar vacantes', 'err')
+            }
+          } catch {
+            showToast('Fallo de conexión', 'err')
+          } finally {
+            actionLoading.value = false
+          }
+        }
+
         async function testIntegration(name) {
           testing[name] = true
           testResult[name] = null
@@ -1115,6 +1138,7 @@ HTML_DASHBOARD = r"""<!DOCTYPE html>
           copyText,
           saveConfig,
           triggerAction,
+          clearAllJobs,
           testIntegration,
           getSourceDesc,
         }

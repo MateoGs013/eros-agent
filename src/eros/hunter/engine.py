@@ -102,6 +102,12 @@ class HunterEngine:
         """Alias para purga completa de vacantes no calificadas/descartadas."""
         return await self.purge_incompatible_and_discarded_jobs()
 
+    async def clear_all_jobs(self) -> int:
+        """Elimina todas las vacantes escaneadas de la base de datos para escanear desde cero."""
+        deleted = await self.storage.delete_all_jobs()
+        logger.info(f"Todas las vacantes escaneadas ({deleted}) fueron eliminadas.")
+        return deleted
+
     async def get_or_create_profile_vector(self, force_refresh: bool = False) -> list[float]:
         """Obtiene el vector embedding del perfil de Mateo, generándolo si no existe."""
         if not force_refresh:
