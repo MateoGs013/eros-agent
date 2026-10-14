@@ -77,10 +77,16 @@ class TestApiContentEndpoints(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(post_data["id"], "post_test_api_1")
 
     async def test_02_carousel_html_render(self):
-        """Verifica GET /api/content/carousel/{id}/html y que no tenga emojis."""
+        """Verifica GET /api/content/carousel/{id}/html con auth y que no tenga emojis."""
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-            res = await client.get("/api/content/carousel/post_test_api_1/html")
+            # Sin autenticacion debe retornar 401
+            res_unauth = await client.get("/api/content/carousel/post_test_api_1/html")
+            self.assertEqual(res_unauth.status_code, 401)
+
+            # Con autenticacion valida debe retornar 200
+            headers = {"Authorization": "Bearer eros_dev_sec_7f9b8c2d1e0a4f5b6c7d8e9f0a1b2c3d"}
+            res = await client.get("/api/content/carousel/post_test_api_1/html", headers=headers)
             self.assertEqual(res.status_code, 200)
             html = res.text
             self.assertIn("Slide Uno", html)
@@ -114,6 +120,29 @@ class TestApiContentEndpoints(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(res_pub.status_code, 200)
                 self.assertTrue(res_pub.json()["ok"])
                 self.assertEqual(res_pub.json()["status"], "approved_local")
+
+    async def test_04_n8n_webhook_callback(self):
+        """Verifica POST /api/webhooks/n8n/callback con y sin auth."""
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            payload = {"post_id": "post_test_api_1", "status": "published", "details": {"ok": True}}
+
+            # 1. Con secret inválido debe rechazar con 401
+            res_bad = await client.post(
+                "/api/webhooks/n8n/callback",
+                json=payload,
+                headers={"X-N8N-Secret": "invalid_secret"},
+            )
+            self.assertEqual(res_bad.status_code, 401)
+
+            # 2. Con secret válido vía X-Eros-Key o X-N8N-Secret
+            res_ok = await client.post(
+                "/api/webhooks/n8n/callback",
+                json=payload,
+                headers={"X-Eros-Key": "eros_dev_sec_7f9b8c2d1e0a4f5b6c7d8e9f0a1b2c3d"},
+            )
+            self.assertEqual(res_ok.status_code, 200)
+            self.assertTrue(res_ok.json()["ok"])
 
 
 if __name__ == "__main__":

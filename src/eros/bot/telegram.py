@@ -1,4 +1,5 @@
 import asyncio
+import html
 import json
 import logging
 from typing import Any
@@ -75,37 +76,37 @@ class TelegramBot:
             return False
 
         badge = "[MATCH ALTO]" if match.score >= 85 else "[MATCH]"
-        salary_text = f"\n• <b>Salario:</b> {job.salary}" if job.salary else ""
-        country_text = f"\n• <b>Ubicación:</b> {job.country}" if job.country else ""
+        salary_text = f"\n• <b>Salario:</b> {html.escape(job.salary)}" if job.salary else ""
+        country_text = f"\n• <b>Ubicación:</b> {html.escape(job.country)}" if job.country else ""
 
         recruiter_text = ""
         hiring_name = job.hiring_manager_name or match.hiring_manager_name
         hiring_title = job.hiring_manager_title or match.hiring_manager_title
         if hiring_name:
-            recruiter_text = f"\n• <b>Hiring Lead:</b> {hiring_name}"
+            recruiter_text = f"\n• <b>Hiring Lead:</b> {html.escape(hiring_name)}"
             if hiring_title:
-                recruiter_text += f" ({hiring_title})"
+                recruiter_text += f" ({html.escape(hiring_title)})"
 
-        email_text = f"\n• <b>Email Contacto:</b> <code>{job.contact_email}</code>" if job.contact_email else ""
+        email_text = f"\n• <b>Email Contacto:</b> <code>{html.escape(job.contact_email)}</code>" if job.contact_email else ""
 
         pros_text = ""
         if match.pros:
-            pros_text = "\n\n<b>Puntos destacados:</b>\n" + "\n".join([f"• {p}" for p in match.pros[:3]])
+            pros_text = "\n\n<b>Puntos destacados:</b>\n" + "\n".join([f"• {html.escape(p)}" for p in match.pros[:3]])
 
         connection_note = job.connection_note or match.recruiter_note
         note_text = ""
         if connection_note:
-            note_text = f"\n\n<b>Nota de conexión LinkedIn (&lt; 280 car.):</b>\n<code>{connection_note}</code>"
+            note_text = f"\n\n<b>Nota de conexión LinkedIn (&lt; 280 car.):</b>\n<code>{html.escape(connection_note)}</code>"
 
         msg = (
             f"<b>{badge} NUEVA VACANTE COMPATIBLE ({match.score}%)</b>\n\n"
-            f"<b>Puesto:</b> {job.title}\n"
-            f"<b>Empresa:</b> {job.company} ({job.source.upper()})"
+            f"<b>Puesto:</b> {html.escape(job.title)}\n"
+            f"<b>Empresa:</b> {html.escape(job.company)} ({html.escape(job.source.upper())})"
             f"{country_text}"
             f"{salary_text}"
             f"{recruiter_text}"
             f"{email_text}\n\n"
-            f"<b>Análisis:</b> {match.summary}"
+            f"<b>Análisis:</b> {html.escape(match.summary)}"
             f"{pros_text}"
             f"{note_text}"
         )
@@ -225,12 +226,12 @@ class TelegramBot:
 
                 summary = (
                     f"<b>[NUEVO POST GENERADO] (Borrador)</b>\n\n"
-                    f"• <b>Título:</b> {post.title}\n"
-                    f"• <b>Pilar:</b> {post.pillar.value}\n"
+                    f"• <b>Título:</b> {html.escape(post.title)}\n"
+                    f"• <b>Pilar:</b> {html.escape(post.pillar.value)}\n"
                     f"• <b>Tweets:</b> {len(post.twitter_thread)} tweets preparados\n"
                     f"• <b>Slides:</b> {len(post.carousel_slides)} diapositivas listas\n\n"
-                    f"<b>Hook LinkedIn:</b>\n<i>{post.hook}</i>\n\n"
-                    f"<b>Primer comentario:</b>\n<code>{post.first_comment}</code>"
+                    f"<b>Hook LinkedIn:</b>\n<i>{html.escape(post.hook)}</i>\n\n"
+                    f"<b>Primer comentario:</b>\n<code>{html.escape(post.first_comment)}</code>"
                 )
 
                 buttons = [
@@ -246,7 +247,7 @@ class TelegramBot:
                 await self.send_message(chat_id, summary, reply_markup={"inline_keyboard": buttons})
             except Exception as e:
                 logger.error(f"Error generando post en Telegram: {e}")
-                await self.send_message(chat_id, f"[ERROR] No se pudo generar el post: {str(e)}")
+                await self.send_message(chat_id, f"[ERROR] No se pudo generar el post: {html.escape(str(e))}")
 
         elif cmd == "/pendientes":
             drafts = await self.content_storage.list_posts(status=ContentPostStatus.DRAFT, limit=5)
@@ -264,7 +265,7 @@ class TelegramBot:
                         {"text": "Descartar", "callback_data": f"del_post:{post.id}"}
                     ]
                 ]
-                card = f"• <b>{post.title}</b> ({post.pillar.value})\n<i>{post.hook[:120]}...</i>"
+                card = f"• <b>{html.escape(post.title)}</b> ({html.escape(post.pillar.value)})\n<i>{html.escape(post.hook[:120])}...</i>"
                 await self.send_message(chat_id, card, reply_markup={"inline_keyboard": buttons})
 
         elif cmd == "/status":
@@ -344,15 +345,15 @@ class TelegramBot:
 
                 recruiter_line = ""
                 if job.hiring_manager_name:
-                    recruiter_line = f"\n• <b>Lead:</b> {job.hiring_manager_name}"
+                    recruiter_line = f"\n• <b>Lead:</b> {html.escape(job.hiring_manager_name)}"
                     if job.hiring_manager_title:
-                        recruiter_line += f" ({job.hiring_manager_title})"
+                        recruiter_line += f" ({html.escape(job.hiring_manager_title)})"
 
                 note_line = ""
                 if job.connection_note:
-                    note_line = f"\n• <b>Nota de Conexión:</b>\n<code>{job.connection_note}</code>"
+                    note_line = f"\n• <b>Nota de Conexión:</b>\n<code>{html.escape(job.connection_note)}</code>"
 
-                card = f"• <b>Match {job.match_score}%</b>: {job.title} en <b>{job.company}</b> ({job.source.upper()}){recruiter_line}{note_line}"
+                card = f"• <b>Match {job.match_score}%</b>: {html.escape(job.title)} en <b>{html.escape(job.company)}</b> ({html.escape(job.source.upper())}){recruiter_line}{note_line}"
                 await self.send_message(chat_id, card, reply_markup={"inline_keyboard": buttons})
 
     async def _handle_callback(self, cb_id: str, chat_id: int | str, data: str) -> None:
@@ -371,7 +372,7 @@ class TelegramBot:
                 status_note = "Enviado a n8n para distribución automática." if res.get("status") == "published" else res.get("message")
                 await self.send_message(chat_id, f"<b>[APROBADO] Publicación procesada con éxito:</b>\n{status_note}")
             else:
-                await self.send_message(chat_id, f"<b>[ERROR] Falla en despacho:</b> {res.get('error')}")
+                await self.send_message(chat_id, f"<b>[ERROR] Falla en despacho:</b> {html.escape(str(res.get('error')))}")
 
         elif data.startswith("del_post:"):
             post_id = data.split("del_post:")[1]
@@ -388,9 +389,9 @@ class TelegramBot:
 
             pitch_msg = (
                 f"<b>[PITCH PERSONALIZADO PARA LA VACANTE]</b>\n\n"
-                f"• <b>Asunto sugerido:</b>\n<code>{pitch.subject_or_hook}</code>\n\n"
-                f"• <b>Propuesta directa:</b>\n<pre>{pitch.elevator_pitch}</pre>\n\n"
-                f"• <b>Proyectos citados:</b> {', '.join(pitch.suggested_projects)}"
+                f"• <b>Asunto sugerido:</b>\n<code>{html.escape(pitch.subject_or_hook)}</code>\n\n"
+                f"• <b>Propuesta directa:</b>\n<pre>{html.escape(pitch.elevator_pitch)}</pre>\n\n"
+                f"• <b>Proyectos citados:</b> {html.escape(', '.join(pitch.suggested_projects))}"
             )
             await self.send_message(chat_id, pitch_msg)
 
@@ -406,10 +407,10 @@ class TelegramBot:
             if res.get("ok"):
                 msg = (
                     f"<b>[POSTULACIÓN ENVIADA CON ÉXITO]</b>\n\n"
-                    f"• <b>Destinatario:</b> <code>{res.get('dispatched_to')}</code>\n"
-                    f"• <b>Canal:</b> {res.get('provider', '').upper()}\n"
+                    f"• <b>Destinatario:</b> <code>{html.escape(str(res.get('dispatched_to')))}</code>\n"
+                    f"• <b>Canal:</b> {html.escape(str(res.get('provider', '')).upper())}\n"
                     f"• <b>Estado:</b> Vacante registrada como POSTULADA en base de datos."
                 )
                 await self.send_message(chat_id, msg)
             else:
-                await self.send_message(chat_id, f"<b>[ERROR EN POSTULACIÓN]</b>\n{res.get('error')}")
+                await self.send_message(chat_id, f"<b>[ERROR EN POSTULACIÓN]</b>\n{html.escape(str(res.get('error')))}")

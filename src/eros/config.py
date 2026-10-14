@@ -48,6 +48,7 @@ class Settings(BaseSettings):
     # n8n Automation Webhooks
     n8n_webhook_url: str = ""
     n8n_application_webhook_url: str = ""
+    n8n_webhook_secret: str = ""
 
     # SMTP / Direct Email Settings (Opcional si se usa SMTP directo en vez de n8n)
     smtp_host: str = ""

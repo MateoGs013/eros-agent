@@ -171,6 +171,28 @@ async def verify_auth(
     return token
 
 
+def verify_webhook_auth(
+    x_n8n_secret: str | None = Header(None, alias="X-N8N-Secret"),
+    x_eros_key: str | None = Header(None, alias="X-Eros-Key"),
+    authorization: str | None = Header(None),
+) -> bool:
+    """Verifica la firma o token secreto del webhook de n8n contra N8N_WEBHOOK_SECRET o EROS_API_KEY."""
+    expected_secret = get_settings().n8n_webhook_secret.strip() or get_settings().eros_api_key.strip()
+    if not expected_secret:
+        return True
+
+    provided = x_n8n_secret or x_eros_key
+    if not provided and authorization and authorization.lower().startswith("bearer "):
+        provided = authorization[7:].strip()
+
+    if not provided or not secrets.compare_digest(provided.strip(), expected_secret):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="No autorizado para invocar el webhook de n8n",
+        )
+    return True
+
+
 # ==============================================================================
 # Vistas Públicas & Autenticación
 # ==============================================================================
@@ -619,7 +641,7 @@ async def delete_content_post(post_id: str):
     return {"ok": True, "deleted": post_id}
 
 
-@app.get("/api/content/carousel/{post_id}/html", response_class=HTMLResponse)
+@app.get("/api/content/carousel/{post_id}/html", response_class=HTMLResponse, dependencies=[Depends(verify_auth)])
 async def get_carousel_html(post_id: str, auto_print: bool = False):
     """Devuelve la vista interactiva e imprimible (Print to PDF de LinkedIn) de las diapositivas."""
     post = await content_storage.get_post(post_id)
@@ -630,7 +652,7 @@ async def get_carousel_html(post_id: str, auto_print: bool = False):
     return HTMLResponse(content=html, media_type="text/html")
 
 
-@app.post("/api/webhooks/n8n/callback")
+@app.post("/api/webhooks/n8n/callback", dependencies=[Depends(verify_webhook_auth)])
 async def n8n_callback(payload: dict[str, Any]):
     """Webhook receptor de confirmación desde n8n cuando se ejecuta un workflow."""
     logger.info(f"Callback recibido desde n8n: {payload}")

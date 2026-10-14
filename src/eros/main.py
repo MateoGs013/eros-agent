@@ -114,16 +114,13 @@ async def main() -> None:
         await bot.start_polling()
         return
 
-    # 6. Modo demonio: Servidor FastAPI + Bot de Telegram
+    # 6. Modo demonio: Servidor FastAPI (el lifespan de FastAPI gestiona el bot de Telegram en segundo plano)
     if args.daemon:
         import uvicorn
-        print(f"[INICIANDO] Modo Demonio (API Server + Bot Telegram)...")
+        print(f"[INICIANDO] Modo Demonio (API Server + Bot Telegram vía lifespan)...")
         config = uvicorn.Config("eros.api:app", host="0.0.0.0", port=args.port, log_level="info")
         server = uvicorn.Server(config)
-        tasks = [server.serve()]
-        if bot.is_configured:
-            tasks.append(bot.start_polling())
-        await asyncio.gather(*tasks)
+        await server.serve()
         return
 
     # 7. Servidor FastAPI por defecto
