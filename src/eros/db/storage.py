@@ -18,6 +18,9 @@ class JobStorage:
     async def init_db(self) -> None:
         """Crea las tablas necesarias si no existen."""
         async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("PRAGMA journal_mode=WAL;")
+            await db.execute("PRAGMA busy_timeout=5000;")
+            await db.execute("PRAGMA synchronous=NORMAL;")
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS jobs (
                     id TEXT PRIMARY KEY,

@@ -1,3 +1,4 @@
+import html
 import json
 import logging
 import re
@@ -470,23 +471,24 @@ Generá el JSON del CV adaptado siguiendo estrictamente las instrucciones del si
         """Renderiza un documento HTML estricto Harvard ATS (1 página A4, imprimible a PDF)."""
         skills_html = ""
         for category, items in cv.skills.items():
+            escaped_items = [html.escape(item) for item in items]
             skills_html += f"""
             <div class="skills-row">
-                <span class="skill-category">{category}:</span>
-                <span class="skill-items">{", ".join(items)}</span>
+                <span class="skill-category">{html.escape(category)}:</span>
+                <span class="skill-items">{", ".join(escaped_items)}</span>
             </div>
             """
 
         experience_html = ""
         for exp in cv.experience:
-            bullets = "".join(f"<li>{b}</li>" for b in exp.bullets)
-            techs = f"<div class='exp-techs'><em>Tech:</em> {', '.join(exp.tech_stack)}</div>" if exp.tech_stack else ""
-            loc_str = f"{exp.location} · " if exp.location else ""
+            bullets = "".join(f"<li>{html.escape(b)}</li>" for b in exp.bullets)
+            techs = f"<div class='exp-techs'><em>Tech:</em> {', '.join(html.escape(t) for t in exp.tech_stack)}</div>" if exp.tech_stack else ""
+            loc_str = f"{html.escape(exp.location)} · " if exp.location else ""
             experience_html += f"""
             <div class="exp-entry">
                 <div class="exp-header">
-                    <span class="exp-title"><strong>{exp.title}</strong> — {exp.role}</span>
-                    <span class="exp-period">{loc_str}{exp.period}</span>
+                    <span class="exp-title"><strong>{html.escape(exp.title)}</strong> — {html.escape(exp.role)}</span>
+                    <span class="exp-period">{loc_str}{html.escape(exp.period)}</span>
                 </div>
                 <ul class="exp-bullets">
                     {bullets}
@@ -497,13 +499,14 @@ Generá el JSON del CV adaptado siguiendo estrictamente las instrucciones del si
 
         education_html = ""
         for ed in cv.education:
+            edu_details = f'<div class="edu-details">{html.escape(ed.details)}</div>' if ed.details else ''
             education_html += f"""
             <div class="edu-entry">
                 <div class="edu-header">
-                    <strong>{ed.institution}</strong> — {ed.degree}
-                    <span class="edu-period">{ed.period}</span>
+                    <strong>{html.escape(ed.institution)}</strong> — {html.escape(ed.degree)}
+                    <span class="edu-period">{html.escape(ed.period)}</span>
                 </div>
-                {f'<div class="edu-details">{ed.details}</div>' if ed.details else ''}
+                {edu_details}
             </div>
             """
 
@@ -518,18 +521,20 @@ Generá el JSON del CV adaptado siguiendo estrictamente las instrucciones del si
         lang_rows = []
         if cv.languages:
             lang_label = "Languages" if is_en else "Idiomas"
+            escaped_langs = [html.escape(lang) for lang in cv.languages]
             lang_rows.append(f"""
             <div class="skills-row">
                 <span class="skill-category">{lang_label}:</span>
-                <span class="skill-items">{' · '.join(cv.languages)}</span>
+                <span class="skill-items">{' · '.join(escaped_langs)}</span>
             </div>
             """)
         if cv.methodologies:
             meth_label = "Engineering Standards & Practices" if is_en else "Buenas Prácticas & Estándares"
+            escaped_meths = [html.escape(m) for m in cv.methodologies]
             lang_rows.append(f"""
             <div class="skills-row">
                 <span class="skill-category">{meth_label}:</span>
-                <span class="skill-items">{' · '.join(cv.methodologies)}</span>
+                <span class="skill-items">{' · '.join(escaped_meths)}</span>
             </div>
             """)
         if lang_rows:
@@ -541,11 +546,20 @@ Generá el JSON del CV adaptado siguiendo estrictamente las instrucciones del si
             </section>
             """
 
+        esc_name = html.escape(cv.name)
+        esc_title = html.escape(cv.title)
+        esc_summary = html.escape(cv.summary)
+        esc_location = html.escape(cv.location)
+        esc_email = html.escape(cv.email)
+        esc_portfolio = html.escape(cv.portfolio)
+        esc_linkedin = html.escape(cv.linkedin)
+        esc_github = html.escape(cv.github)
+
         return f"""<!doctype html>
 <html lang="{cv.language}">
 <head>
 <meta charset="utf-8">
-<title>{cv.name} — Curriculum Vitae</title>
+<title>{esc_name} — Curriculum Vitae</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
   @page {{
@@ -759,24 +773,24 @@ Generá el JSON del CV adaptado siguiendo estrictamente las instrucciones del si
 
   <main class="cv-page">
     <header class="cv-header">
-      <h1 class="cv-name">{cv.name}</h1>
-      <div class="cv-title">{cv.title}</div>
+      <h1 class="cv-name">{esc_name}</h1>
+      <div class="cv-title">{esc_title}</div>
       <div class="cv-contact">
-        <span>{cv.location}</span>
+        <span>{esc_location}</span>
         <span class="sep">·</span>
-        <a href="mailto:{cv.email}">{cv.email}</a>
+        <a href="mailto:{esc_email}">{esc_email}</a>
         <span class="sep">·</span>
-        <a href="{cv.portfolio}" target="_blank">mateogs.tech</a>
+        <a href="{esc_portfolio}" target="_blank">mateogs.tech</a>
         <span class="sep">·</span>
-        <a href="{cv.linkedin}" target="_blank">LinkedIn</a>
+        <a href="{esc_linkedin}" target="_blank">LinkedIn</a>
         <span class="sep">·</span>
-        <a href="{cv.github}" target="_blank">GitHub</a>
+        <a href="{esc_github}" target="_blank">GitHub</a>
       </div>
     </header>
 
     <section class="cv-section">
       <h2 class="section-title">{summary_title}</h2>
-      <p class="cv-summary">{cv.summary}</p>
+      <p class="cv-summary">{esc_summary}</p>
     </section>
 
     <section class="cv-section">

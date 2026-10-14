@@ -33,9 +33,8 @@ class JobApplicationDispatcher:
         # Perfil base de respaldo si aún no sincronizó
         return ProfileContext(
             name=self.settings.candidate_name,
-            title="Full Stack Software Engineer",
-            skills=["Vue 3", "Nuxt 4", "Node.js", "Express 5", "TypeScript", "PostgreSQL", "Docker", "Python", "FastAPI"],
-            experience_years=3,
+            role="Full Stack Software Engineer",
+            tech_stack=["Vue 3", "Nuxt 4", "Node.js", "Express 5", "TypeScript", "PostgreSQL", "Docker", "Python", "FastAPI"],
             location="Neuquén / Río Negro, Patagonia Argentina",
         )
 

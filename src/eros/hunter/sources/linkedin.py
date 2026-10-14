@@ -98,6 +98,7 @@ class LinkedInJobsSource(BaseJobSource):
                         clean_url = f"https://www.linkedin.com/jobs/view/{job_id_ext}"
 
                         # Intentar obtener la descripción completa desde la API pública de detalle
+                        description = ""
                         hiring_name = None
                         hiring_title = None
                         hiring_url = None
