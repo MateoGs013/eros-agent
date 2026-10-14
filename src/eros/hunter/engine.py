@@ -4,7 +4,8 @@ import logging
 from eros.config import get_settings
 from eros.db.storage import JobStorage
 from eros.hunter.cv_generator import CVGenerator
-from eros.hunter.filters import check_job_qualification
+from eros.hunter.filters import check_job_qualification, extract_contact_email
+from eros.hunter.dispatcher import JobApplicationDispatcher
 from eros.hunter.matcher import JobMatcher
 from eros.hunter.pitch import PitchGenerator
 from eros.hunter.sources.base import BaseJobSource
@@ -44,6 +45,7 @@ class HunterEngine:
         self.matcher = JobMatcher()
         self.pitch_gen = PitchGenerator()
         self.cv_gen = CVGenerator()
+        self.app_dispatcher = JobApplicationDispatcher(storage=self.storage)
         self.sources: list[BaseJobSource] = [
             RemotiveSource(),
             WeWorkRemotelySource(),
@@ -58,9 +60,25 @@ class HunterEngine:
         """Inicializa la base de datos y sincroniza el perfil inicial si no existe."""
         await self.storage.init_db()
         await self.clean_existing_unqualified_jobs()
+        await self.backfill_missing_contact_emails()
         cached = await self.storage.get_profile_cache()
         if not cached:
             await self.sync_profile()
+
+    async def backfill_missing_contact_emails(self, limit: int = 500) -> int:
+        """Extrae y actualiza retroactivamente correos de contacto en vacantes existentes."""
+        all_jobs = await self.storage.list_all_jobs(limit=limit)
+        updated = 0
+        for j in all_jobs:
+            if not j.contact_email and j.description:
+                email = extract_contact_email(j.description)
+                if email:
+                    j.contact_email = email
+                    await self.storage.update_job_contact_email(j.id, email)
+                    updated += 1
+        if updated > 0:
+            logger.info(f"Se detectaron y actualizaron {updated} correos de contacto en vacantes existentes.")
+        return updated
 
     async def purge_incompatible_and_discarded_jobs(self) -> int:
         """Purga y elimina físicamente de la base de datos las vacantes incompatibles y descartadas."""
@@ -242,6 +260,10 @@ class HunterEngine:
             if not qual.qualified:
                 logger.debug(f"Descartada antes de guardar '{job.title}': {qual.reason}")
                 continue
+
+            # Extraer correo de contacto laboral si está presente en la descripción
+            if not job.contact_email and job.description:
+                job.contact_email = extract_contact_email(job.description)
 
             is_new = await self.storage.save_job(job)
             if is_new:

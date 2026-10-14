@@ -45,8 +45,20 @@ class Settings(BaseSettings):
     ]
     anthropic_api_key: str = ""
 
-    # n8n Automation Webhook
+    # n8n Automation Webhooks
     n8n_webhook_url: str = ""
+    n8n_application_webhook_url: str = ""
+
+    # SMTP / Direct Email Settings (Opcional si se usa SMTP directo en vez de n8n)
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_pass: str = ""
+    smtp_from: str = "mateogabus@gmail.com"
+    candidate_name: str = "Mateo Gabriel Sonzogni"
+    candidate_portfolio_url: str = "https://mateogs.tech"
+    candidate_linkedin_url: str = "https://www.linkedin.com/in/mateo-sonzogni"
+    candidate_github_url: str = "https://github.com/MateoGs013"
 
     # Job Hunter thresholds
     match_min_score: int = 75

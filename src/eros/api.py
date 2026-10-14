@@ -123,6 +123,17 @@ class SemanticSearchRequest(BaseModel):
     limit: int = 30
 
 
+class ApplyEmailRequest(BaseModel):
+    to_email: str | None = None
+    subject: str | None = None
+    body: str | None = None
+    channel: str = "auto"
+
+
+class ContactEmailUpdateRequest(BaseModel):
+    contact_email: str
+
+
 # ==============================================================================
 # Seguridad y Autenticación
 # ==============================================================================
@@ -495,6 +506,42 @@ async def delete_single_job(job_id: str):
         raise HTTPException(status_code=404, detail="Oferta no encontrada")
     await engine.storage.delete_job(job_id)
     return {"ok": True, "deleted_id": job_id}
+
+
+@app.get("/api/jobs/{job_id}/apply-preview", dependencies=[Depends(verify_auth)])
+async def get_apply_preview(job_id: str):
+    """Devuelve la vista previa del asunto, cuerpo y enlaces para postular por correo."""
+    preview = await engine.app_dispatcher.get_application_preview(job_id)
+    if not preview.get("ok"):
+        raise HTTPException(status_code=404, detail=preview.get("error", "Error generando vista previa"))
+    return preview
+
+
+@app.post("/api/jobs/{job_id}/apply-email", dependencies=[Depends(verify_auth)])
+async def apply_job_by_email(job_id: str, payload: ApplyEmailRequest | None = None):
+    """Despacha la postulación personalizada con CV Harvard ATS y pitch vía n8n o SMTP."""
+    req = payload or ApplyEmailRequest()
+    res = await engine.app_dispatcher.dispatch_application(
+        job_id=job_id,
+        to_email=req.to_email,
+        custom_subject=req.subject,
+        custom_body=req.body,
+        channel=req.channel,
+    )
+    if not res.get("ok"):
+        raise HTTPException(status_code=400, detail=res.get("error", "Fallo al despachar postulación"))
+    return res
+
+
+@app.patch("/api/jobs/{job_id}/contact-email", dependencies=[Depends(verify_auth)])
+async def update_job_contact_email(job_id: str, body: ContactEmailUpdateRequest):
+    """Actualiza o define el correo de contacto para una vacante."""
+    job = await engine.storage.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Oferta no encontrada")
+    email = body.contact_email.strip().lower()
+    await engine.storage.update_job_contact_email(job_id, email)
+    return {"ok": True, "job_id": job_id, "contact_email": email}
 
 
 @app.post("/api/profile/sync", dependencies=[Depends(verify_auth)])

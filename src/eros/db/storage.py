@@ -64,7 +64,9 @@ class JobStorage:
                 "hiring_manager_name TEXT",
                 "hiring_manager_title TEXT",
                 "hiring_manager_url TEXT",
-                "connection_note TEXT"
+                "connection_note TEXT",
+                "contact_email TEXT",
+                "applied_at TEXT"
             ]:
                 try:
                     await db.execute(f"ALTER TABLE jobs ADD COLUMN {col}")
@@ -115,8 +117,8 @@ class JobStorage:
                         tags, salary, country, is_remote, published_at, found_at,
                         status, match_score, match_analysis, pitch_draft, tailored_cv,
                         semantic_score, embedding, hiring_manager_name, hiring_manager_title,
-                        hiring_manager_url, connection_note
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        hiring_manager_url, connection_note, contact_email, applied_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     job.id, job.source, job.external_id, job.title, job.company, job.url,
                     job.description, tags_json, job.salary, job.country,
@@ -124,7 +126,7 @@ class JobStorage:
                     job.status.value, job.match_score, job.match_analysis, job.pitch_draft,
                     job.tailored_cv, job.semantic_score, embedding_json,
                     job.hiring_manager_name, job.hiring_manager_title,
-                    job.hiring_manager_url, job.connection_note
+                    job.hiring_manager_url, job.connection_note, job.contact_email, job.applied_at
                 ))
             else:
                 await db.execute("""
@@ -134,13 +136,16 @@ class JobStorage:
                         hiring_manager_name = COALESCE(?, hiring_manager_name),
                         hiring_manager_title = COALESCE(?, hiring_manager_title),
                         hiring_manager_url = COALESCE(?, hiring_manager_url),
-                        connection_note = COALESCE(?, connection_note)
+                        connection_note = COALESCE(?, connection_note),
+                        contact_email = COALESCE(?, contact_email),
+                        applied_at = COALESCE(?, applied_at)
                     WHERE id = ?
                 """, (
                     job.status.value, job.match_score, job.match_analysis, job.pitch_draft,
                     job.tailored_cv, job.salary, job.semantic_score, embedding_json,
                     job.hiring_manager_name, job.hiring_manager_title,
-                    job.hiring_manager_url, job.connection_note, job.id
+                    job.hiring_manager_url, job.connection_note, job.contact_email,
+                    job.applied_at, job.id
                 ))
 
             await db.commit()
@@ -218,8 +223,34 @@ class JobStorage:
 
     async def update_job_status(self, job_id: str, status: JobStatus) -> None:
         """Actualiza el estado de una vacante (ej: aplicada, descartada)."""
+        now_iso = datetime.now(timezone.utc).isoformat()
         async with aiosqlite.connect(self.db_path) as db:
-            await db.execute("UPDATE jobs SET status = ? WHERE id = ?", (status.value, job_id))
+            if status == JobStatus.APPLIED:
+                await db.execute(
+                    "UPDATE jobs SET status = ?, applied_at = COALESCE(applied_at, ?) WHERE id = ?",
+                    (status.value, now_iso, job_id)
+                )
+            else:
+                await db.execute("UPDATE jobs SET status = ? WHERE id = ?", (status.value, job_id))
+            await db.commit()
+
+    async def update_job_contact_email(self, job_id: str, contact_email: str | None) -> None:
+        """Actualiza el correo de contacto para postulación de una vacante."""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("UPDATE jobs SET contact_email = ? WHERE id = ?", (contact_email, job_id))
+            await db.commit()
+
+    async def record_application(self, job_id: str, contact_email: str | None = None) -> None:
+        """Marca una vacante como postulada con fecha y correo de envío."""
+        now_iso = datetime.now(timezone.utc).isoformat()
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("""
+                UPDATE jobs SET
+                    status = ?,
+                    applied_at = ?,
+                    contact_email = COALESCE(?, contact_email)
+                WHERE id = ?
+            """, (JobStatus.APPLIED.value, now_iso, contact_email, job_id))
             await db.commit()
 
     async def delete_job(self, job_id: str) -> None:
@@ -292,6 +323,8 @@ class JobStorage:
         hiring_manager_title = row["hiring_manager_title"] if "hiring_manager_title" in keys else None
         hiring_manager_url = row["hiring_manager_url"] if "hiring_manager_url" in keys else None
         connection_note = row["connection_note"] if "connection_note" in keys else None
+        contact_email = row["contact_email"] if "contact_email" in keys else None
+        applied_at = row["applied_at"] if "applied_at" in keys else None
 
         return JobOffer(
             id=row["id"],
@@ -318,6 +351,8 @@ class JobStorage:
             hiring_manager_title=hiring_manager_title,
             hiring_manager_url=hiring_manager_url,
             connection_note=connection_note,
+            contact_email=contact_email,
+            applied_at=applied_at,
         )
 
     async def update_job_embedding(self, job_id: str, embedding: list[float], semantic_score: int) -> None:

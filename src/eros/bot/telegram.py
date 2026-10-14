@@ -86,6 +86,8 @@ class TelegramBot:
             if hiring_title:
                 recruiter_text += f" ({hiring_title})"
 
+        email_text = f"\n• <b>Email Contacto:</b> <code>{job.contact_email}</code>" if job.contact_email else ""
+
         pros_text = ""
         if match.pros:
             pros_text = "\n\n<b>Puntos destacados:</b>\n" + "\n".join([f"• {p}" for p in match.pros[:3]])
@@ -101,7 +103,8 @@ class TelegramBot:
             f"<b>Empresa:</b> {job.company} ({job.source.upper()})"
             f"{country_text}"
             f"{salary_text}"
-            f"{recruiter_text}\n\n"
+            f"{recruiter_text}"
+            f"{email_text}\n\n"
             f"<b>Análisis:</b> {match.summary}"
             f"{pros_text}"
             f"{note_text}"
@@ -115,12 +118,12 @@ class TelegramBot:
         if hiring_url:
             first_row.append({"text": "Ver Recruiter", "url": hiring_url})
 
-        buttons = [
-            first_row,
-            [
-                {"text": "Descartar", "callback_data": f"discard:{job.id}"}
-            ]
-        ]
+        second_row = []
+        if job.contact_email:
+            second_row.append({"text": "Enviar CV por Email", "callback_data": f"apply_email:{job.id}"})
+        second_row.append({"text": "Descartar", "callback_data": f"discard:{job.id}"})
+
+        buttons = [first_row, second_row]
         keyboard = {"inline_keyboard": buttons}
 
         return await self.send_message(self.allowed_user_id, msg, reply_markup=keyboard)
@@ -392,3 +395,18 @@ class TelegramBot:
             job_id = data.split("discard:")[1]
             await self.engine.storage.update_job_status(job_id, JobStatus.DISCARDED)
             await self.send_message(chat_id, "Vacante descartada de la lista.")
+
+        elif data.startswith("apply_email:"):
+            job_id = data.split("apply_email:")[1]
+            await self.send_message(chat_id, "<i>[POSTULANDO] Despachando postulación con CV Harvard ATS y pitch personalizado...</i>")
+            res = await self.engine.app_dispatcher.dispatch_application(job_id=job_id)
+            if res.get("ok"):
+                msg = (
+                    f"<b>[POSTULACIÓN ENVIADA CON ÉXITO]</b>\n\n"
+                    f"• <b>Destinatario:</b> <code>{res.get('dispatched_to')}</code>\n"
+                    f"• <b>Canal:</b> {res.get('provider', '').upper()}\n"
+                    f"• <b>Estado:</b> Vacante registrada como POSTULADA en base de datos."
+                )
+                await self.send_message(chat_id, msg)
+            else:
+                await self.send_message(chat_id, f"<b>[ERROR EN POSTULACIÓN]</b>\n{res.get('error')}")
