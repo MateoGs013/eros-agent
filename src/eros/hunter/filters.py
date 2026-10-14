@@ -127,3 +127,48 @@ def check_job_qualification(
                 return QualificationResult(False, "Incompatibilidad geográfica/legal (Exclusivo EE.UU./Europa, Clearance o W-2)")
 
     return QualificationResult(True, "Calificada")
+
+
+# ─── EXTRACTOR DE CORREOS DE CONTACTO PARA POSTULACIONES ──────────────────────
+
+EMAIL_REGEX = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,7}\b")
+
+IGNORED_EMAIL_DOMAINS = {
+    "sentry.io", "w3.org", "example.com", "schema.org", "github.com",
+    "computrabajo.com", "linkedin.com", "google.com", "cloudflare.com",
+    "domain.com", "yourcompany.com", "acme.com", "email.com", "mailer.com",
+}
+
+IGNORED_EMAIL_PREFIXES = {
+    "noreply", "no-reply", "donotreply", "mailer-daemon", "bounce", "abuse",
+}
+
+
+def extract_contact_email(text: str) -> str | None:
+    """Extrae el primer correo electrónico válido de contacto laboral de un texto."""
+    if not text:
+        return None
+    matches = EMAIL_REGEX.findall(text)
+    for m in matches:
+        email = m.strip().lower()
+        # Limpiar puntuación común pegada al final (ej. punto, coma)
+        email = email.rstrip(".,;:!?)'\"")
+        if "@" not in email:
+            continue
+        parts = email.split("@")
+        if len(parts) != 2:
+            continue
+        prefix, domain = parts[0], parts[1]
+
+        if prefix in IGNORED_EMAIL_PREFIXES:
+            continue
+
+        if any(domain == d or domain.endswith("." + d) for d in IGNORED_EMAIL_DOMAINS):
+            continue
+
+        # Excluir extensiones de imagen que coinciden con regex de email
+        if any(email.endswith(ext) for ext in [".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".ico"]):
+            continue
+
+        return email
+    return None

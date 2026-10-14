@@ -43,6 +43,10 @@ class JobOffer(BaseModel):
     hiring_manager_url: str | None = None
     connection_note: str | None = None
 
+    # Despacho Automatizado de Postulaciones (Email / ATS)
+    contact_email: str | None = None
+    applied_at: str | None = None
+
 
 class CVProject(BaseModel):
     title: str

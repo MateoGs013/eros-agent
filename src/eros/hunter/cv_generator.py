@@ -423,6 +423,49 @@ Generá el JSON del CV adaptado siguiendo estrictamente las instrucciones del si
             language="en" if is_en else "es",
         )
 
+    def render_plain_text(self, cv: TailoredCV) -> str:
+        """Renderiza una versión estructurada en texto plano para correos y formularios ATS."""
+        lines = [
+            cv.name,
+            f"{cv.title} | {cv.location} | {cv.email}",
+            f"{cv.portfolio} | {cv.github} | {cv.linkedin}",
+            "",
+            "PROFESSIONAL SUMMARY" if cv.language == "en" else "PERFIL PROFESIONAL",
+            cv.summary,
+            "",
+            "CORE COMPETENCIES & STACK" if cv.language == "en" else "HABILIDADES TÉCNICAS",
+        ]
+        for cat, items in cv.skills.items():
+            lines.append(f"{cat}: {', '.join(items)}")
+
+        lines.extend(["", "EXPERIENCE & SHIPPED WORK" if cv.language == "en" else "EXPERIENCIA Y PROYECTOS"])
+        for exp in cv.experience:
+            lines.append(f"{exp.title} — {exp.role} ({exp.period})")
+            for b in exp.bullets:
+                lines.append(f"• {b}")
+            if exp.tech_stack:
+                lines.append(f"  Tech: {', '.join(exp.tech_stack)}")
+            lines.append("")
+
+        lines.append("EDUCATION" if cv.language == "en" else "EDUCACIÓN")
+        for edu in cv.education:
+            lines.append(f"{edu.degree} — {edu.institution} ({edu.period})")
+            if edu.details:
+                lines.append(edu.details)
+            lines.append("")
+
+        if cv.languages:
+            lines.append("LANGUAGES" if cv.language == "en" else "IDIOMAS")
+            lines.append(" · ".join(cv.languages))
+            lines.append("")
+
+        if cv.methodologies:
+            lines.append("ENGINEERING PRACTICES & METHODOLOGIES" if cv.language == "en" else "BUENAS PRÁCTICAS Y METODOLOGÍAS")
+            lines.append(" · ".join(cv.methodologies))
+            lines.append("")
+
+        return "\n".join(lines)
+
     def render_harvard_html(self, cv: TailoredCV) -> str:
         """Renderiza un documento HTML estricto Harvard ATS (1 página A4, imprimible a PDF)."""
         skills_html = ""
