@@ -116,7 +116,7 @@ def check_job_qualification(
 
     # 5. Exclusiones Geográficas / Legales
     # Si la ubicación explícita dice 'US Only' o ciudades de EE.UU. sin especificar remoto abierto
-    combined_geo_text = f"{country_clean} {desc_clean[:1500]}"
+    combined_geo_text = f"{country_clean} {desc_clean[:4000]}"
     
     # Revisar excepciones que habilitan LATAM o Worldwide
     has_override = any(pat.search(combined_geo_text) for pat in GEO_EXCEPTIONS)
