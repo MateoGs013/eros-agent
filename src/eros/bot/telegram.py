@@ -170,9 +170,11 @@ class TelegramBot:
             chat_id = msg.get("chat", {}).get("id")
             text = (msg.get("text") or "").strip()
 
-            # Seguridad: responder solo a Mateo si está configurado
-            if self.allowed_user_id and user_id != self.allowed_user_id:
-                logger.warning(f"Intento de acceso no autorizado desde usuario ID {user_id}")
+            # Seguridad: responder exclusivamente al usuario autorizado configurado en TELEGRAM_ALLOWED_USER_ID
+            if not self.allowed_user_id or user_id != self.allowed_user_id:
+                logger.warning(f"Intento de acceso rechazado desde usuario ID {user_id}. TELEGRAM_ALLOWED_USER_ID={self.allowed_user_id}")
+                if chat_id and not self.allowed_user_id:
+                    await self._send_message(chat_id, f"Bot configurado en modo seguro. Para autorizar tu cuenta, definí TELEGRAM_ALLOWED_USER_ID={user_id} en tu archivo .env.")
                 return
 
             await self._handle_command(chat_id, text, user_id)
@@ -185,7 +187,8 @@ class TelegramBot:
             chat_id = cb.get("message", {}).get("chat", {}).get("id")
             data = cb.get("data", "")
 
-            if self.allowed_user_id and user_id != self.allowed_user_id:
+            if not self.allowed_user_id or user_id != self.allowed_user_id:
+                logger.warning(f"Callback query no autorizado rechazado desde usuario ID {user_id}")
                 return
 
             await self._handle_callback(cb_id, chat_id, data)

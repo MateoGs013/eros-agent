@@ -144,25 +144,28 @@ def verify_key(key: str | None) -> bool:
         return False
     current_key = get_settings().eros_api_key.strip()
     if not current_key:
-        current_key = "eros_dev_sec_7f9b8c2d1e0a4f5b6c7d8e9f0a1b2c3d"
+        return False
     return secrets.compare_digest(key.strip(), current_key)
 
 
 async def verify_auth(
     authorization: str | None = Header(None),
+    x_eros_key: str | None = Header(None, alias="X-Eros-Key"),
     eros_session: str | None = Cookie(None),
 ) -> str:
-    """Dependencia de autenticación: verifica Bearer token o cookie HTTP-only eros_session."""
+    """Dependencia de autenticación: verifica Bearer token, header X-Eros-Key o cookie HTTP-only eros_session."""
     token = None
     if authorization and authorization.lower().startswith("bearer "):
         token = authorization[7:].strip()
+    elif x_eros_key:
+        token = x_eros_key.strip()
     elif eros_session:
         token = eros_session.strip()
 
     if not token or not verify_key(token):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="No autorizado. Proporcione una EROS_API_KEY válida vía Bearer token o sesión.",
+            detail="No autorizado. Proporcione una EROS_API_KEY válida vía Bearer token, header X-Eros-Key o sesión.",
             headers={"WWW-Authenticate": "Bearer"},
         )
     return token
@@ -711,7 +714,7 @@ async def generate_post_from_trend(trend_id: str, payload: TrendGenerateRequest 
         pillar=pillar_val,  # type: ignore
     )
 
-    post = await content_generator.generate(gen_req)
+    post = await content_generator.generate_post(gen_req)
     await radar_storage.update_status(trend_id, TrendStatus.GENERATED, post_id=post.id)
     return {
         "ok": True,
