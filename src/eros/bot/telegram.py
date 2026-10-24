@@ -402,8 +402,67 @@ class TelegramBot:
 
         elif data.startswith("apply_email:"):
             job_id = data.split("apply_email:")[1]
+            job = await self.engine.storage.get_job(job_id)
+            if not job:
+                await self.send_message(chat_id, "Vacante no encontrada.")
+                return
+
+            # Bloquear postulación si ya fue enviada
+            if job.status == JobStatus.APPLIED or job.applied_at:
+                await self.send_message(
+                    chat_id,
+                    f"<b>[POSTULACIÓN BLOQUEADA]</b>\nLa vacante '{html.escape(job.title)}' ya fue enviada previamente ({job.applied_at or 'estado APPLIED'}). Evitando envío duplicado."
+                )
+                return
+
+            # Generar previsualización y requerir confirmación explícita
+            preview = await self.engine.app_dispatcher.get_application_preview(job_id)
+            if not preview.get("ok"):
+                await self.send_message(chat_id, f"<b>[ERROR EN PREVIEW]</b>\n{html.escape(str(preview.get('error')))}")
+                return
+
+            email_dest = preview.get("contact_email") or "No especificado"
+            is_unverified = not preview.get("contact_email_verified", True)
+            warn_unverified = (
+                "\n⚠️ <i>ATENCIÓN: El correo fue extraído de la descripción y no está verificado manualmente.</i>\n"
+                if is_unverified else ""
+            )
+
+            preview_msg = (
+                f"<b>[CONFIRMACIÓN DE POSTULACIÓN]</b>\n\n"
+                f"• <b>Puesto:</b> {html.escape(job.title)}\n"
+                f"• <b>Empresa:</b> {html.escape(job.company)}\n"
+                f"• <b>Destinatario:</b> <code>{html.escape(email_dest)}</code>"
+                f"{warn_unverified}\n"
+                f"• <b>Asunto:</b> <code>{html.escape(preview.get('subject', ''))}</code>\n\n"
+                f"<b>Cuerpo del correo (extracto):</b>\n"
+                f"<pre>{html.escape(preview.get('body', '')[:400])}...</pre>\n\n"
+                f"¿Deseas enviar la postulación ahora?"
+            )
+            buttons = [
+                [
+                    {"text": "Confirmar y Enviar", "callback_data": f"confirm_apply:{job_id}"},
+                    {"text": "Cancelar", "callback_data": f"cancel_apply:{job_id}"}
+                ]
+            ]
+            await self.send_message(chat_id, preview_msg, reply_markup={"inline_keyboard": buttons})
+
+        elif data.startswith("confirm_apply:"):
+            job_id = data.split("confirm_apply:")[1]
+            job = await self.engine.storage.get_job(job_id)
+            if not job:
+                await self.send_message(chat_id, "Vacante no encontrada.")
+                return
+
+            if job.status == JobStatus.APPLIED or job.applied_at:
+                await self.send_message(
+                    chat_id,
+                    f"<b>[POSTULACIÓN BLOQUEADA]</b> La vacante '{html.escape(job.title)}' ya fue enviada previamente ({job.applied_at or 'estado APPLIED'})."
+                )
+                return
+
             await self.send_message(chat_id, "<i>[POSTULANDO] Despachando postulación con CV Harvard ATS y pitch personalizado...</i>")
-            res = await self.engine.app_dispatcher.dispatch_application(job_id=job_id)
+            res = await self.engine.app_dispatcher.dispatch_application(job_id=job_id, confirmed=True)
             if res.get("ok"):
                 msg = (
                     f"<b>[POSTULACIÓN ENVIADA CON ÉXITO]</b>\n\n"
@@ -414,3 +473,6 @@ class TelegramBot:
                 await self.send_message(chat_id, msg)
             else:
                 await self.send_message(chat_id, f"<b>[ERROR EN POSTULACIÓN]</b>\n{html.escape(str(res.get('error')))}")
+
+        elif data.startswith("cancel_apply:"):
+            await self.send_message(chat_id, "Postulación cancelada.")

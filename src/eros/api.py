@@ -60,12 +60,24 @@ async def lifespan(app: FastAPI):
         logger.info("Iniciando bot de Telegram en segundo plano...")
         bot_task = asyncio.create_task(telegram_bot.start_polling())
 
+    scanner_task = None
+    if settings.periodic_scan_enabled:
+        logger.info(f"Iniciando escaneo periodico en segundo plano (cada {settings.periodic_scan_interval_hours}h)...")
+        from eros.main import periodic_scanner
+        scanner_task = asyncio.create_task(periodic_scanner(engine, telegram_bot, interval_hours=settings.periodic_scan_interval_hours))
+    else:
+        logger.info("Escaneo periodico autonomo desactivado (PERIODIC_SCAN_ENABLED=False). Escaneo solo bajo demanda.")
+
     yield
 
     if bot_task:
         logger.info("Deteniendo bot de Telegram...")
         telegram_bot.running = False
         bot_task.cancel()
+
+    if scanner_task:
+        logger.info("Deteniendo tarea periódica de escaneo...")
+        scanner_task.cancel()
 
 
 app = FastAPI(
@@ -128,6 +140,7 @@ class ApplyEmailRequest(BaseModel):
     subject: str | None = None
     body: str | None = None
     channel: str = "auto"
+    confirmed: bool = False
 
 
 class ContactEmailUpdateRequest(BaseModel):
@@ -176,10 +189,17 @@ def verify_webhook_auth(
     x_eros_key: str | None = Header(None, alias="X-Eros-Key"),
     authorization: str | None = Header(None),
 ) -> bool:
-    """Verifica la firma o token secreto del webhook de n8n contra N8N_WEBHOOK_SECRET o EROS_API_KEY."""
+    """Verifica la firma o token secreto del webhook de n8n contra N8N_WEBHOOK_SECRET o EROS_API_KEY.
+    
+    Aplica fail-closed estricto: si no hay secreto configurado, rechaza con 401.
+    """
     expected_secret = get_settings().n8n_webhook_secret.strip() or get_settings().eros_api_key.strip()
     if not expected_secret:
-        return True
+        logger.warning("Rechazando webhook de n8n: no hay N8N_WEBHOOK_SECRET ni EROS_API_KEY configurados (fail-closed).")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Autenticación de webhook no configurada en el servidor (fail-closed).",
+        )
 
     provided = x_n8n_secret or x_eros_key
     if not provided and authorization and authorization.lower().startswith("bearer "):
@@ -317,7 +337,8 @@ async def test_integration(service: str):
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 resp = await client.get(
-                    f"https://generativelanguage.googleapis.com/v1beta/models?key={current_settings.gemini_api_key}"
+                    "https://generativelanguage.googleapis.com/v1beta/models",
+                    headers={"x-goog-api-key": current_settings.gemini_api_key}
                 )
                 latency = int((time.perf_counter() - start) * 1000)
                 if resp.status_code == 200:
@@ -552,6 +573,7 @@ async def apply_job_by_email(job_id: str, payload: ApplyEmailRequest | None = No
         custom_subject=req.subject,
         custom_body=req.body,
         channel=req.channel,
+        confirmed=req.confirmed,
     )
     if not res.get("ok"):
         raise HTTPException(status_code=400, detail=res.get("error", "Fallo al despachar postulación"))

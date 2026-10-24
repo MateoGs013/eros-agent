@@ -1,6 +1,8 @@
 import asyncio
+import email.utils
 import json
 import logging
+import ssl
 from datetime import datetime, timezone
 import smtplib
 from email.mime.multipart import MIMEMultipart
@@ -123,6 +125,12 @@ class JobApplicationDispatcher:
                 f"{self.settings.smtp_from} | {self.settings.candidate_portfolio_url}"
             )
 
+        is_extracted = bool(
+            job.contact_email
+            and job.description
+            and job.contact_email.lower() in job.description.lower()
+        )
+
         return {
             "ok": True,
             "job_id": job.id,
@@ -135,6 +143,8 @@ class JobApplicationDispatcher:
             "is_english": is_en,
             "status": job.status.value,
             "applied_at": job.applied_at,
+            "contact_email_verified": not is_extracted,
+            "is_email_extracted": is_extracted,
         }
 
     async def dispatch_application(
@@ -143,25 +153,67 @@ class JobApplicationDispatcher:
         to_email: str | None = None,
         custom_subject: str | None = None,
         custom_body: str | None = None,
-        channel: str = "auto"
+        channel: str = "auto",
+        confirmed: bool = False,
     ) -> dict[str, Any]:
         """Despacha la postulación al destinatario vía n8n o SMTP."""
         job = await self.storage.get_job(job_id)
         if not job:
             return {"ok": False, "error": f"Vacante {job_id} no encontrada"}
 
+        # 1. Bloquear postulación si ya está aplicada o tiene applied_at (evitar duplicados)
+        if job.status == JobStatus.APPLIED or job.applied_at:
+            return {
+                "ok": False,
+                "error": f"Postulación bloqueada: La vacante '{job.title}' ya fue postulada previamente ({job.applied_at or 'estado APPLIED'}). Evitando envío duplicado."
+            }
+
         preview = await self.get_application_preview(job_id)
         if not preview.get("ok"):
             return preview
 
-        recipient_email = (to_email or job.contact_email or "").strip().lower()
-        if not recipient_email:
+        raw_recipient = (to_email or job.contact_email or "").strip()
+        if not raw_recipient:
             return {
                 "ok": False,
                 "error": "No hay un correo de contacto registrado para esta vacante. Por favor especificá uno."
             }
 
-        final_subject = custom_subject or preview["subject"]
+        # 2. Validar destinatario con email.utils.parseaddr
+        _, parsed_addr = email.utils.parseaddr(raw_recipient)
+        if not parsed_addr or "@" not in parsed_addr or "." not in parsed_addr.split("@")[-1]:
+            return {
+                "ok": False,
+                "error": f"El correo destinatario '{raw_recipient}' no tiene un formato válido."
+            }
+        recipient_email = parsed_addr.lower()
+
+        # 3. Marcar el email extraído de la descripción como no verificado y requerir confirmación
+        is_extracted = bool(
+            not to_email
+            and job.contact_email
+            and job.description
+            and job.contact_email.lower() in job.description.lower()
+        )
+        if is_extracted and not confirmed:
+            return {
+                "ok": False,
+                "requires_confirmation": True,
+                "error": f"El correo '{recipient_email}' fue extraído automáticamente de la descripción y no está verificado. Requiere confirmación explícita antes de enviar (confirmed=True)."
+            }
+
+        # 4. Requerir confirmación explícita si no está previsualizado
+        is_previewed = bool(custom_subject and custom_body)
+        if not confirmed and not is_previewed:
+            return {
+                "ok": False,
+                "requires_confirmation": True,
+                "error": "El envío de postulación requiere confirmación explícita previa o previsualización del contenido."
+            }
+
+        # 5. Sanitizar final_subject quitando \r\n
+        raw_subject = custom_subject or preview["subject"]
+        final_subject = raw_subject.replace("\r", " ").replace("\n", " ").strip()
         final_body = custom_body or preview["body"]
         now_iso = datetime.now(timezone.utc).isoformat()
 
@@ -233,11 +285,18 @@ class JobApplicationDispatcher:
                     msg["To"] = recipient_email
                     msg.attach(MIMEText(final_body, "plain", "utf-8"))
 
-                    with smtplib.SMTP(self.settings.smtp_host, self.settings.smtp_port, timeout=15) as server:
-                        server.starttls()
-                        if self.settings.smtp_user and self.settings.smtp_pass:
-                            server.login(self.settings.smtp_user, self.settings.smtp_pass)
-                        server.sendmail(self.settings.smtp_from, [recipient_email], msg.as_string())
+                    ssl_ctx = ssl.create_default_context()
+                    if self.settings.smtp_port == 465:
+                        with smtplib.SMTP_SSL(self.settings.smtp_host, self.settings.smtp_port, context=ssl_ctx, timeout=15) as server:
+                            if self.settings.smtp_user and self.settings.smtp_pass:
+                                server.login(self.settings.smtp_user, self.settings.smtp_pass)
+                            server.sendmail(self.settings.smtp_from, [recipient_email], msg.as_string())
+                    else:
+                        with smtplib.SMTP(self.settings.smtp_host, self.settings.smtp_port, timeout=15) as server:
+                            server.starttls(context=ssl_ctx)
+                            if self.settings.smtp_user and self.settings.smtp_pass:
+                                server.login(self.settings.smtp_user, self.settings.smtp_pass)
+                            server.sendmail(self.settings.smtp_from, [recipient_email], msg.as_string())
 
                 await asyncio.to_thread(_send_sync_smtp)
                 provider = "smtp"

@@ -19,6 +19,9 @@ class TestApiContentEndpoints(unittest.IsolatedAsyncioTestCase):
     """Auditoría de integración para los endpoints HTTP de contenido en FastAPI."""
 
     async def asyncSetUp(self):
+        os.environ["EROS_API_KEY"] = "eros_dev_sec_7f9b8c2d1e0a4f5b6c7d8e9f0a1b2c3d"
+        from eros.config import get_settings
+        get_settings.cache_clear()
         self.emoji_pattern = re.compile(r'[\U00010000-\U0010ffff]|[\u2600-\u27bf]')
         self.tmp_dir = tempfile.TemporaryDirectory()
         self.db_path = os.path.join(self.tmp_dir.name, "test_api_eros.db")
@@ -57,6 +60,9 @@ class TestApiContentEndpoints(unittest.IsolatedAsyncioTestCase):
 
     async def asyncTearDown(self):
         self.tmp_dir.cleanup()
+        os.environ.pop("EROS_API_KEY", None)
+        from eros.config import get_settings
+        get_settings.cache_clear()
 
     async def test_01_list_and_get_endpoints(self):
         """Verifica GET /api/content/posts y GET /api/content/posts/{id}."""

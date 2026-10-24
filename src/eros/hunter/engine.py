@@ -265,7 +265,7 @@ class HunterEngine:
             if not job.contact_email and job.description:
                 job.contact_email = extract_contact_email(job.description)
 
-            is_new = await self.storage.save_job(job)
+            is_new = await self.storage.save_scraped_job(job)
             if is_new:
                 new_jobs += 1
                 newly_saved_jobs.append(job)
@@ -310,6 +310,7 @@ class HunterEngine:
             
             job.match_score = match.score
             job.match_analysis = json.dumps(match.model_dump())
+            job.scored_by = getattr(match, "scored_by", "gemini")
             if (not job.salary or not job.salary.strip()) and match.salary_estimate:
                 job.salary = match.salary_estimate
 
@@ -353,6 +354,7 @@ class HunterEngine:
         match = await self.matcher.evaluate(job, profile)
         job.match_score = match.score
         job.match_analysis = json.dumps(match.model_dump())
+        job.scored_by = getattr(match, "scored_by", "gemini")
         if (not job.salary or not job.salary.strip()) and match.salary_estimate:
             job.salary = match.salary_estimate
 
