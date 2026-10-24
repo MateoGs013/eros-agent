@@ -1,10 +1,12 @@
 import asyncio
+import base64
 import email.utils
 import json
 import logging
 import ssl
 from datetime import datetime, timezone
 import smtplib
+from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import Any
@@ -96,6 +98,7 @@ class JobApplicationDispatcher:
             body = (
                 f"Dear Hiring Team at {job.company},\n\n"
                 f"{pitch_content}\n\n"
+                f"I have attached my tailored single-page ATS Resume (PDF) for your review.\n\n"
                 f"Featured production work & engineering portfolio:\n"
                 f"• Live Portfolio: {self.settings.candidate_portfolio_url}\n"
                 f"• LinkedIn: {self.settings.candidate_linkedin_url}\n"
@@ -112,6 +115,7 @@ class JobApplicationDispatcher:
             body = (
                 f"Estimado equipo de selección de {job.company},\n\n"
                 f"{pitch_content}\n\n"
+                f"Adjunto mi Currículum Vitae en formato Harvard ATS (PDF de 1 página) para su revisión.\n\n"
                 f"Proyectos en producción y portafolio de ingeniería:\n"
                 f"• Portafolio en vivo: {self.settings.candidate_portfolio_url}\n"
                 f"• LinkedIn: {self.settings.candidate_linkedin_url}\n"
@@ -139,6 +143,8 @@ class JobApplicationDispatcher:
             "contact_email": job.contact_email or "",
             "subject": subject,
             "body": body,
+            "cv_filename": "CV_Mateo_Sonzogni.pdf",
+            "has_pdf_attachment": True,
             "cv_html_url": cv_html_url,
             "is_english": is_en,
             "status": job.status.value,
@@ -230,6 +236,8 @@ class JobApplicationDispatcher:
             tailored_cv = self.cv_gen._build_fallback_cv(profile, job)
 
         cv_plain_text = self.cv_gen.render_plain_text(tailored_cv)
+        pdf_bytes = self.cv_gen.render_pdf(tailored_cv)
+        pdf_base64 = base64.b64encode(pdf_bytes).decode("ascii") if pdf_bytes else ""
 
         payload_n8n = {
             "event": "job.application",
@@ -247,6 +255,8 @@ class JobApplicationDispatcher:
                 "linkedin": self.settings.candidate_linkedin_url,
                 "github": self.settings.candidate_github_url,
             },
+            "cv_filename": "CV_Mateo_Sonzogni.pdf",
+            "cv_pdf_base64": pdf_base64,
             "cv_html_url": preview["cv_html_url"],
             "cv_text": cv_plain_text,
             "cv_data": tailored_cv.model_dump(),
@@ -276,14 +286,19 @@ class JobApplicationDispatcher:
 
         # 2. Opción B: SMTP Directo
         elif channel in ["auto", "smtp"] and self.settings.smtp_host:
-            logger.info(f"Despachando postulación para '{job.title}' ({recipient_email}) vía SMTP directo...")
+            logger.info(f"Despachando postulación para '{job.title}' ({recipient_email}) vía SMTP directo con adjunto PDF...")
             try:
                 def _send_sync_smtp():
-                    msg = MIMEMultipart("alternative")
+                    msg = MIMEMultipart()
                     msg["Subject"] = final_subject
                     msg["From"] = self.settings.smtp_from
                     msg["To"] = recipient_email
                     msg.attach(MIMEText(final_body, "plain", "utf-8"))
+
+                    if pdf_bytes:
+                        pdf_part = MIMEApplication(pdf_bytes, _subtype="pdf")
+                        pdf_part.add_header("Content-Disposition", "attachment", filename="CV_Mateo_Sonzogni.pdf")
+                        msg.attach(pdf_part)
 
                     ssl_ctx = ssl.create_default_context()
                     if self.settings.smtp_port == 465:

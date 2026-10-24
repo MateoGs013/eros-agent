@@ -515,7 +515,8 @@ async def generate_cv(job_id: str):
     return {"data": cv_data, "html": html}
 
 
-@app.get("/api/cv/{job_id}/html", response_class=HTMLResponse, dependencies=[Depends(verify_auth)])
+@app.get("/api/cv/{job_id}/html", response_class=HTMLResponse)
+@app.get("/api/jobs/{job_id}/cv/html", response_class=HTMLResponse)
 async def get_cv_html(job_id: str, auto_print: bool = False):
     """Devuelve la vista HTML imprimible del CV de la vacante."""
     html = await engine.get_cv_html_for_job(job_id)
@@ -524,6 +525,25 @@ async def get_cv_html(job_id: str, auto_print: bool = False):
     if auto_print:
         html = html.replace("</body>", "<script>window.addEventListener('load', () => { setTimeout(() => window.print(), 350); });</script></body>")
     return HTMLResponse(content=html, media_type="text/html")
+
+
+@app.get("/api/cv/{job_id}/pdf")
+@app.get("/api/jobs/{job_id}/cv/pdf")
+async def get_cv_pdf(job_id: str, download: bool = False):
+    """Devuelve los bytes del PDF (1 página A4 Harvard ATS) del CV adaptado para la vacante."""
+    pdf_bytes = await engine.get_cv_pdf_for_job(job_id)
+    if not pdf_bytes:
+        raise HTTPException(status_code=404, detail="CV en PDF no disponible para esta oferta")
+
+    disposition = "attachment" if download else "inline"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'{disposition}; filename="CV_Mateo_Sonzogni.pdf"',
+            "Content-Length": str(len(pdf_bytes)),
+        },
+    )
 
 
 @app.patch("/api/jobs/{job_id}/status", dependencies=[Depends(verify_auth)])
