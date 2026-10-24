@@ -69,7 +69,8 @@ class JobStorage:
                 "hiring_manager_url TEXT",
                 "connection_note TEXT",
                 "contact_email TEXT",
-                "applied_at TEXT"
+                "applied_at TEXT",
+                "scored_by TEXT"
             ]:
                 try:
                     await db.execute(f"ALTER TABLE jobs ADD COLUMN {col}")
@@ -106,7 +107,78 @@ class JobStorage:
             await db.commit()
 
     async def save_job(self, job: JobOffer) -> bool:
-        """Guarda o actualiza una vacante. Devuelve True si es nueva."""
+        """Guarda o actualiza una vacante. Devuelve True si es nueva.
+        
+        Preserva status y campos evaluados previos si la actualización intenta
+        resetear a 'new' o pasar valores nulos.
+        """
+        async with aiosqlite.connect(self.db_path) as db:
+            async with db.execute("SELECT id, status FROM jobs WHERE id = ?", (job.id,)) as cursor:
+                row = await cursor.fetchone()
+                exists = row is not None
+
+            tags_json = json.dumps(job.tags)
+            embedding_json = json.dumps(job.embedding) if job.embedding else None
+            if not exists:
+                await db.execute("""
+                    INSERT INTO jobs (
+                        id, source, external_id, title, company, url, description,
+                        tags, salary, country, is_remote, published_at, found_at,
+                        status, match_score, match_analysis, pitch_draft, tailored_cv,
+                        semantic_score, embedding, hiring_manager_name, hiring_manager_title,
+                        hiring_manager_url, connection_note, contact_email, applied_at, scored_by
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    job.id, job.source, job.external_id, job.title, job.company, job.url,
+                    job.description, tags_json, job.salary, job.country,
+                    1 if job.is_remote else 0, job.published_at, job.found_at,
+                    job.status.value, job.match_score, job.match_analysis, job.pitch_draft,
+                    job.tailored_cv, job.semantic_score, embedding_json,
+                    job.hiring_manager_name, job.hiring_manager_title,
+                    job.hiring_manager_url, job.connection_note, job.contact_email,
+                    job.applied_at, job.scored_by
+                ))
+            else:
+                await db.execute("""
+                    UPDATE jobs SET
+                        status = CASE WHEN jobs.status != 'new' AND ? = 'new' THEN jobs.status ELSE ? END,
+                        match_score = COALESCE(?, match_score),
+                        match_analysis = COALESCE(?, match_analysis),
+                        pitch_draft = COALESCE(?, pitch_draft),
+                        tailored_cv = COALESCE(?, tailored_cv),
+                        salary = COALESCE(?, salary),
+                        semantic_score = COALESCE(?, semantic_score),
+                        embedding = COALESCE(?, embedding),
+                        hiring_manager_name = COALESCE(?, hiring_manager_name),
+                        hiring_manager_title = COALESCE(?, hiring_manager_title),
+                        hiring_manager_url = COALESCE(?, hiring_manager_url),
+                        connection_note = COALESCE(?, connection_note),
+                        contact_email = COALESCE(?, contact_email),
+                        applied_at = COALESCE(?, applied_at),
+                        scored_by = COALESCE(?, scored_by)
+                    WHERE id = ?
+                """, (
+                    job.status.value, job.status.value,
+                    job.match_score, job.match_analysis, job.pitch_draft,
+                    job.tailored_cv, job.salary, job.semantic_score, embedding_json,
+                    job.hiring_manager_name, job.hiring_manager_title,
+                    job.hiring_manager_url, job.connection_note, job.contact_email,
+                    job.applied_at, job.scored_by, job.id
+                ))
+
+            await db.commit()
+            return not exists
+
+    async def save_scraped_job(self, job: JobOffer) -> bool:
+        """Guarda una vacante obtenida por escaneo continuo. Devuelve True si es nueva.
+
+        Si la vacante ya existía en la base de datos:
+        - NO modifica ni resetea el status (preserva SAVED, APPLIED, DISCARDED, EVALUATED, etc.).
+        - NO sobreescribe ni borra match_score, match_analysis, pitch_draft, tailored_cv,
+          semantic_score, embedding ni scored_by.
+        - Actualiza de forma segura únicamente los datos descriptivos del anuncio (título, descripción,
+          salario si viene informado, modalidad, tags y contact_email).
+        """
         async with aiosqlite.connect(self.db_path) as db:
             async with db.execute("SELECT id FROM jobs WHERE id = ?", (job.id,)) as cursor:
                 exists = await cursor.fetchone() is not None
@@ -120,8 +192,8 @@ class JobStorage:
                         tags, salary, country, is_remote, published_at, found_at,
                         status, match_score, match_analysis, pitch_draft, tailored_cv,
                         semantic_score, embedding, hiring_manager_name, hiring_manager_title,
-                        hiring_manager_url, connection_note, contact_email, applied_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        hiring_manager_url, connection_note, contact_email, applied_at, scored_by
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     job.id, job.source, job.external_id, job.title, job.company, job.url,
                     job.description, tags_json, job.salary, job.country,
@@ -129,26 +201,33 @@ class JobStorage:
                     job.status.value, job.match_score, job.match_analysis, job.pitch_draft,
                     job.tailored_cv, job.semantic_score, embedding_json,
                     job.hiring_manager_name, job.hiring_manager_title,
-                    job.hiring_manager_url, job.connection_note, job.contact_email, job.applied_at
+                    job.hiring_manager_url, job.connection_note, job.contact_email,
+                    job.applied_at, job.scored_by
                 ))
             else:
                 await db.execute("""
                     UPDATE jobs SET
-                        status = ?, match_score = ?, match_analysis = ?, pitch_draft = ?,
-                        tailored_cv = ?, salary = ?, semantic_score = ?, embedding = ?,
-                        hiring_manager_name = COALESCE(?, hiring_manager_name),
-                        hiring_manager_title = COALESCE(?, hiring_manager_title),
-                        hiring_manager_url = COALESCE(?, hiring_manager_url),
-                        connection_note = COALESCE(?, connection_note),
-                        contact_email = COALESCE(?, contact_email),
-                        applied_at = COALESCE(?, applied_at)
+                        title = ?,
+                        company = ?,
+                        url = ?,
+                        description = ?,
+                        tags = ?,
+                        salary = COALESCE(?, salary),
+                        country = COALESCE(?, country),
+                        is_remote = ?,
+                        contact_email = COALESCE(?, contact_email)
                     WHERE id = ?
                 """, (
-                    job.status.value, job.match_score, job.match_analysis, job.pitch_draft,
-                    job.tailored_cv, job.salary, job.semantic_score, embedding_json,
-                    job.hiring_manager_name, job.hiring_manager_title,
-                    job.hiring_manager_url, job.connection_note, job.contact_email,
-                    job.applied_at, job.id
+                    job.title,
+                    job.company,
+                    job.url,
+                    job.description,
+                    tags_json,
+                    job.salary,
+                    job.country,
+                    1 if job.is_remote else 0,
+                    job.contact_email,
+                    job.id
                 ))
 
             await db.commit()
@@ -328,6 +407,7 @@ class JobStorage:
         connection_note = row["connection_note"] if "connection_note" in keys else None
         contact_email = row["contact_email"] if "contact_email" in keys else None
         applied_at = row["applied_at"] if "applied_at" in keys else None
+        scored_by = row["scored_by"] if "scored_by" in keys else None
 
         return JobOffer(
             id=row["id"],
@@ -356,6 +436,7 @@ class JobStorage:
             connection_note=connection_note,
             contact_email=contact_email,
             applied_at=applied_at,
+            scored_by=scored_by,
         )
 
     async def update_job_embedding(self, job_id: str, embedding: list[float], semantic_score: int) -> None:

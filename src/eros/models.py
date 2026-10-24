@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class JobStatus(str, Enum):
@@ -46,6 +46,7 @@ class JobOffer(BaseModel):
     # Despacho Automatizado de Postulaciones (Email / ATS)
     contact_email: str | None = None
     applied_at: str | None = None
+    scored_by: str | None = None
 
 
 class CVProject(BaseModel):
@@ -80,6 +81,13 @@ class TailoredCV(BaseModel):
     methodologies: list[str] = Field(default_factory=list)
     language: str = "en"
 
+    @field_validator("language", mode="before")
+    @classmethod
+    def sanitize_language(cls, v: Any) -> str:
+        if str(v).strip().lower() == "es":
+            return "es"
+        return "en"
+
 
 class MatchResult(BaseModel):
     """Resultado del análisis de compatibilidad semántica con el LLM."""
@@ -95,6 +103,7 @@ class MatchResult(BaseModel):
     hiring_manager_name: str | None = None
     hiring_manager_title: str | None = None
     hiring_manager_url: str | None = None
+    scored_by: str = "gemini"
 
 
 class PitchDraft(BaseModel):

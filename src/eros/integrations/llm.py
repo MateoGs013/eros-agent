@@ -93,7 +93,11 @@ class LLMClient:
     ) -> str:
         """Llama a la API de Google Gemini vía REST."""
         active_model = model or getattr(self.settings, "gemini_model", "gemini-3.5-flash")
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{active_model}:generateContent?key={self.settings.gemini_api_key}"
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{active_model}:generateContent"
+        headers = {
+            "x-goog-api-key": self.settings.gemini_api_key,
+            "content-type": "application/json",
+        }
 
         contents = [{"role": "user", "parts": [{"text": prompt}]}]
 
@@ -114,8 +118,8 @@ class LLMClient:
                 "parts": [{"text": system_prompt}]
             }
 
-        async with httpx.AsyncClient(timeout=12.0) as client:
-            resp = await client.post(url, json=payload)
+        async with httpx.AsyncClient(timeout=45.0) as client:
+            resp = await client.post(url, headers=headers, json=payload)
             if resp.status_code != 200:
                 resp_text = resp.text
                 if resp.status_code == 429 or "RESOURCE_EXHAUSTED" in resp_text or "QuotaFailure" in resp_text:
@@ -176,7 +180,14 @@ class LLMClient:
         tags = [t.strip() for t in tags_m.group(1).split(",")] if tags_m else []
 
         desc = ""
-        if "DESCRIPCIÓN DE LA VACANTE:" in prompt:
+        if "<job_posting>" in prompt:
+            parts = prompt.split("<job_posting>", 1)
+            desc_part = parts[1]
+            if "</job_posting>" in desc_part:
+                desc = desc_part.split("</job_posting>", 1)[0].strip()
+            else:
+                desc = desc_part[:2500].strip()
+        elif "DESCRIPCIÓN DE LA VACANTE:" in prompt:
             parts = prompt.split("DESCRIPCIÓN DE LA VACANTE:", 1)
             desc_part = parts[1]
             if "INFORMACIÓN ACTUALIZADA DE MATEO:" in desc_part:
@@ -314,6 +325,7 @@ class LLMClient:
             "hiring_manager_name": None,
             "hiring_manager_title": None,
             "recruiter_note": recruiter_note,
+            "scored_by": "heuristic",
         }
         return json.dumps(result, ensure_ascii=False)
 
@@ -370,7 +382,11 @@ class LLMClient:
             logger.warning("GEMINI_API_KEY no configurado para embeddings.")
             return []
 
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key={self.settings.gemini_api_key}"
+        url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent"
+        headers = {
+            "x-goog-api-key": self.settings.gemini_api_key,
+            "content-type": "application/json",
+        }
         payload = {
             "model": "models/gemini-embedding-001",
             "taskType": "SEMANTIC_SIMILARITY",
@@ -379,8 +395,8 @@ class LLMClient:
             }
         }
 
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.post(url, json=payload)
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(url, headers=headers, json=payload)
             if resp.status_code != 200:
                 logger.error(f"Gemini Embedding API error HTTP {resp.status_code}: {resp.text[:200]}")
                 return []
@@ -401,7 +417,11 @@ class LLMClient:
 
         for i in range(0, len(texts), chunk_size):
             chunk = texts[i:i + chunk_size]
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:batchEmbedContents?key={self.settings.gemini_api_key}"
+            url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:batchEmbedContents"
+            headers = {
+                "x-goog-api-key": self.settings.gemini_api_key,
+                "content-type": "application/json",
+            }
             requests = [
                 {
                     "model": "models/gemini-embedding-001",
@@ -412,7 +432,7 @@ class LLMClient:
             ]
             try:
                 async with httpx.AsyncClient(timeout=15.0) as client:
-                    resp = await client.post(url, json={"requests": requests})
+                    resp = await client.post(url, headers=headers, json={"requests": requests})
                     if resp.status_code == 200:
                         data = resp.json()
                         embeddings = [e.get("values", []) for e in data.get("embeddings", [])]

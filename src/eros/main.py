@@ -21,23 +21,25 @@ logging.basicConfig(
 logger = logging.getLogger("eros")
 
 
-async def periodic_scanner(engine: HunterEngine, bot: TelegramBot, interval_hours: int = 4) -> None:
-    """Tarea periódica en segundo plano que corre el escaneo cada N horas."""
+async def periodic_scanner(engine: HunterEngine, bot: TelegramBot, interval_hours: int = 24) -> None:
+    settings = get_settings()
     while True:
         try:
-            logger.info("Despertando tarea programada: buscando nuevas ofertas...")
-            scan_res = await engine.run_scan()
-            if scan_res["new_jobs"] > 0:
-                logger.info(f"Evaluando {scan_res['new_jobs']} nuevas ofertas encontradas...")
-                matches = await engine.evaluate_pending_jobs(limit=15)
-                settings = get_settings()
-                for job, match in matches:
-                    if match.score >= settings.match_min_score:
-                        await bot.notify_match(job, match)
+            if not settings.periodic_scan_enabled:
+                logger.info("Escaneo periodico automatico en reposo (PERIODIC_SCAN_ENABLED=False).")
             else:
-                logger.info("No hay nuevas vacantes en esta pasada.")
+                logger.info("Despertando tarea programada: buscando nuevas ofertas...")
+                scan_res = await engine.run_scan()
+                if scan_res["new_jobs"] > 0 and settings.periodic_scan_eval_with_llm:
+                    logger.info("Evaluando nuevas ofertas con LLM...")
+                    matches = await engine.evaluate_pending_jobs(limit=5)
+                    for job, match in matches:
+                        if match.score >= settings.match_min_score:
+                            await bot.notify_match(job, match)
+                else:
+                    logger.info("Escaneo finalizado. Evaluacion automatica omitida para ahorro de cuota.")
         except Exception as e:
-            logger.error(f"Error en tarea periódica de escaneo: {e}")
+            logger.error(f"Error en tarea periodica de escaneo: {e}")
 
         await asyncio.sleep(interval_hours * 3600)
 

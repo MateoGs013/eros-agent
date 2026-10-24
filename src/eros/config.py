@@ -64,6 +64,11 @@ class Settings(BaseSettings):
     # Job Hunter thresholds
     match_min_score: int = 75
 
+    # Autonomous Scanner Settings (desactivado por defecto para ahorrar tokens)
+    periodic_scan_enabled: bool = False
+    periodic_scan_interval_hours: int = 24
+    periodic_scan_eval_with_llm: bool = False
+
     # Storage
     database_path: str = "data/eros.db"
 
