@@ -12,6 +12,7 @@ dependencies = [
     "aiosqlite>=0.21.0",
     "fastapi>=0.118.0",
     "uvicorn[standard]>=0.34.0",
+    "pymupdf>=1.24.0",
 ]
 
 [build-system]

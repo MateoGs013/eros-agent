@@ -1,7 +1,13 @@
 import html
+import io
 import json
 import logging
 import re
+
+try:
+    import fitz
+except ImportError:
+    fitz = None
 from eros.integrations.llm import LLMClient
 from eros.models import (
     JobOffer,
@@ -820,3 +826,232 @@ Generá el JSON del CV adaptado siguiendo estrictamente las instrucciones del si
 </body>
 </html>
 """
+
+    def render_pdf(self, cv: TailoredCV) -> bytes:
+        """Renderiza el CV adaptado en formato Harvard ATS estricto de 1 página A4 (PDF)."""
+        if fitz is None:
+            logger.warning("PyMuPDF (fitz) no está disponible en el entorno; no se puede generar el PDF.")
+            return b""
+
+        is_en = cv.language == "en"
+        summary_title = "PROFESSIONAL SUMMARY" if is_en else "PERFIL PROFESIONAL"
+        skills_title = "TECHNICAL SKILLS" if is_en else "HABILIDADES TÉCNICAS"
+        exp_title = "FEATURED PROJECTS & EXPERIENCE" if is_en else "PROYECTOS Y EXPERIENCIA DESTACADA"
+        edu_title = "EDUCATION" if is_en else "EDUCACIÓN"
+
+        skills_lines = []
+        for cat, items in cv.skills.items():
+            escaped_items = [html.escape(item) for item in items]
+            skills_lines.append(f"<p class='skill-line'><strong>{html.escape(cat)}:</strong> {', '.join(escaped_items)}</p>")
+        skills_html = "\n".join(skills_lines)
+
+        exp_blocks = []
+        for exp in cv.experience:
+            bullets = "".join(f"<li>{html.escape(b)}</li>" for b in exp.bullets)
+            tech = f"<p class='exp-tech'><em>Tech:</em> {', '.join(html.escape(t) for t in exp.tech_stack)}</p>" if exp.tech_stack else ""
+            loc_str = f"{html.escape(exp.location)} · " if exp.location else ""
+            exp_blocks.append(f"""
+            <div class='exp-block'>
+                <table class='tbl-header'><tr>
+                    <td class='left'><strong>{html.escape(exp.title)}</strong> — {html.escape(exp.role)}</td>
+                    <td class='right'>{loc_str}{html.escape(exp.period)}</td>
+                </tr></table>
+                <ul class='bullets'>{bullets}</ul>
+                {tech}
+            </div>
+            """)
+        exp_html = "\n".join(exp_blocks)
+
+        edu_blocks = []
+        for ed in cv.education:
+            details = f"<p class='edu-detail'>{html.escape(ed.details)}</p>" if ed.details else ""
+            edu_blocks.append(f"""
+            <div class='edu-block'>
+                <table class='tbl-header'><tr>
+                    <td class='left'><strong>{html.escape(ed.institution)}</strong> — {html.escape(ed.degree)}</td>
+                    <td class='right'>{html.escape(ed.period)}</td>
+                </tr></table>
+                {details}
+            </div>
+            """)
+        edu_html = "\n".join(edu_blocks)
+
+        lang_meth_lines = []
+        if cv.languages:
+            escaped_langs = [html.escape(l) for l in cv.languages]
+            lang_meth_lines.append(f"<p class='skill-line'><strong>{'Languages' if is_en else 'Idiomas'}:</strong> {' · '.join(escaped_langs)}</p>")
+        if cv.methodologies:
+            escaped_meths = [html.escape(m) for m in cv.methodologies]
+            lang_meth_lines.append(f"<p class='skill-line'><strong>{'Engineering Standards & Practices' if is_en else 'Buenas Prácticas & Estándares'}:</strong> {' · '.join(escaped_meths)}</p>")
+        lang_meth_html = ""
+        if lang_meth_lines:
+            lang_meth_html = f"""
+            <div class='section-heading'>{'LANGUAGES & ENGINEERING PRACTICES' if is_en else 'IDIOMAS Y BUENAS PRÁCTICAS'}</div>
+            {''.join(lang_meth_lines)}
+            """
+
+        esc_name = html.escape(cv.name)
+        esc_title = html.escape(cv.title)
+        esc_summary = html.escape(cv.summary)
+        esc_location = html.escape(cv.location)
+        esc_email = html.escape(cv.email)
+        esc_portfolio = html.escape(cv.portfolio)
+        esc_linkedin = html.escape(cv.linkedin)
+        esc_github = html.escape(cv.github)
+
+        doc_html = f"""<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+body {{
+    font-family: helvetica, arial, sans-serif;
+    color: #111111;
+    font-size: 8pt;
+    line-height: 1.25;
+    margin: 0;
+    padding: 0;
+}}
+.cv-header {{
+    text-align: center;
+    margin-bottom: 4pt;
+    border-bottom: 1.5pt solid #111111;
+    padding-bottom: 3pt;
+}}
+.cv-name {{
+    font-size: 13.5pt;
+    font-weight: bold;
+    letter-spacing: 0.5pt;
+    text-transform: uppercase;
+    margin-bottom: 1pt;
+}}
+.cv-title {{
+    font-size: 8.8pt;
+    font-weight: bold;
+    color: #222222;
+    margin-bottom: 1pt;
+}}
+.cv-contact {{
+    font-size: 7.8pt;
+    color: #333333;
+}}
+.cv-contact a {{
+    color: #111111;
+    text-decoration: none;
+}}
+.section-heading {{
+    font-size: 8.5pt;
+    font-weight: bold;
+    text-transform: uppercase;
+    letter-spacing: 0.5pt;
+    color: #000000;
+    margin-top: 4pt;
+    border-bottom: 0.8pt solid #111111;
+    padding-bottom: 1pt;
+}}
+.summary-text {{
+    font-size: 8pt;
+    line-height: 1.25;
+    color: #222222;
+    margin-top: 2pt;
+    margin-bottom: 2pt;
+    text-align: justify;
+}}
+.skill-line {{
+    font-size: 7.8pt;
+    line-height: 1.25;
+    margin: 1.2pt 0;
+    color: #222222;
+}}
+.tbl-header {{
+    width: 100%;
+    margin-top: 2.5pt;
+    margin-bottom: 0.5pt;
+}}
+.tbl-header td.left {{
+    font-size: 8.2pt;
+    text-align: left;
+}}
+.tbl-header td.right {{
+    font-size: 7.8pt;
+    text-align: right;
+    color: #444444;
+}}
+.bullets {{
+    margin: 0 0 0 12pt;
+    padding: 0;
+}}
+.bullets li {{
+    font-size: 7.8pt;
+    line-height: 1.22;
+    color: #222222;
+    margin-bottom: 0.8pt;
+}}
+.exp-tech {{
+    font-size: 7.3pt;
+    color: #444444;
+    margin: 0.8pt 0 1.5pt 12pt;
+}}
+.edu-detail {{
+    font-size: 7.6pt;
+    color: #444444;
+    margin: 0.5pt 0 1.5pt 0;
+    line-height: 1.2;
+}}
+</style>
+</head>
+<body>
+    <div class="cv-header">
+        <div class="cv-name">{esc_name}</div>
+        <div class="cv-title">{esc_title}</div>
+        <div class="cv-contact">
+            {esc_location} · <a href="mailto:{esc_email}">{esc_email}</a> · <a href="{esc_portfolio}">mateogs.tech</a> · <a href="{esc_linkedin}">LinkedIn</a> · <a href="{esc_github}">GitHub</a>
+        </div>
+    </div>
+
+    <div class="section-heading">{summary_title}</div>
+    <p class="summary-text">{esc_summary}</p>
+
+    <div class="section-heading">{skills_title}</div>
+    {skills_html}
+
+    <div class="section-heading">{exp_title}</div>
+    {exp_html}
+
+    <div class="section-heading">{edu_title}</div>
+    {edu_html}
+
+    {lang_meth_html}
+</body>
+</html>"""
+
+        try:
+            mediabox = fitz.Rect(0, 0, 595.28, 841.89)
+            where = fitz.Rect(36, 36, 595.28 - 36, 841.89 - 36)
+
+            # Escala adaptativa para asegurar ajuste en exactamente 1 página A4
+            best_scale = 1.0
+            for scale in [1.0, 0.97, 0.94, 0.91, 0.88, 0.85, 0.82, 0.78]:
+                test_story = fitz.Story(html=doc_html)
+                scaled_rect = fitz.Rect(where.x0 / scale, where.y0 / scale, where.x1 / scale, where.y1 / scale)
+                more, _ = test_story.place(scaled_rect)
+                if not more:
+                    best_scale = scale
+                    break
+
+            buf = io.BytesIO()
+            writer = fitz.DocumentWriter(buf)
+            story = fitz.Story(html=doc_html)
+            final_scaled_rect = fitz.Rect(where.x0 / best_scale, where.y0 / best_scale, where.x1 / best_scale, where.y1 / best_scale)
+            mat = fitz.Matrix(best_scale, best_scale)
+
+            def rectfn(rect_num, filled):
+                return mediabox, final_scaled_rect, mat
+
+            story.write(writer, rectfn)
+            writer.close()
+            return buf.getvalue()
+        except Exception as e:
+            logger.error(f"Error renderizando PDF con fitz: {e}")
+            return b""
+

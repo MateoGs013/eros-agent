@@ -432,3 +432,23 @@ class HunterEngine:
 
         res = await self.generate_cv_for_job(job_id)
         return res[1] if res else None
+
+    async def get_cv_pdf_for_job(self, job_id: str) -> bytes | None:
+        """Obtiene o renderiza el PDF (1 página A4 Harvard ATS) del CV adaptado para una vacante."""
+        job = await self.storage.get_job(job_id)
+        if not job:
+            return None
+
+        if job.tailored_cv:
+            try:
+                cv_data = TailoredCV.model_validate_json(job.tailored_cv)
+                return self.cv_gen.render_pdf(cv_data)
+            except Exception as e:
+                logger.error(f"Error parseando tailored_cv guardado para PDF: {e}")
+
+        res = await self.generate_cv_for_job(job_id)
+        if res:
+            tailored_cv, _ = res
+            return self.cv_gen.render_pdf(tailored_cv)
+        return None
+
