@@ -611,6 +611,38 @@ async def update_job_contact_email(job_id: str, body: ContactEmailUpdateRequest)
     return {"ok": True, "job_id": job_id, "contact_email": email}
 
 
+@app.post("/api/jobs/{job_id}/find-email", dependencies=[Depends(verify_auth)])
+async def find_job_contact_email(job_id: str):
+    """Fuerza la búsqueda y resolución automática del correo de selección para una vacante."""
+    job = await engine.storage.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Oferta no encontrada")
+
+    found_email, source = await engine.email_finder.resolve_contact_email(
+        company=job.company,
+        job_url=job.url,
+        recruiter_name=job.hiring_manager_name,
+        description=job.description,
+    )
+    if found_email:
+        job.contact_email = found_email
+        await engine.storage.update_job_contact_email(job_id, found_email)
+        return {
+            "ok": True,
+            "job_id": job_id,
+            "contact_email": found_email,
+            "source": source,
+            "found": True,
+        }
+    return {
+        "ok": True,
+        "job_id": job_id,
+        "contact_email": job.contact_email,
+        "source": source,
+        "found": False,
+    }
+
+
 @app.post("/api/profile/sync", dependencies=[Depends(verify_auth)])
 async def sync_profile():
     """Fuerza la sincronización del perfil desde la API del portafolio."""

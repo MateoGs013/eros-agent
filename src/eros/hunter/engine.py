@@ -4,6 +4,7 @@ import logging
 from eros.config import get_settings
 from eros.db.storage import JobStorage
 from eros.hunter.cv_generator import CVGenerator
+from eros.hunter.email_finder import EmailFinder
 from eros.hunter.filters import check_job_qualification, extract_contact_email
 from eros.hunter.dispatcher import JobApplicationDispatcher
 from eros.hunter.matcher import JobMatcher
@@ -45,7 +46,8 @@ class HunterEngine:
         self.matcher = JobMatcher()
         self.pitch_gen = PitchGenerator()
         self.cv_gen = CVGenerator()
-        self.app_dispatcher = JobApplicationDispatcher(storage=self.storage)
+        self.email_finder = EmailFinder(self.settings)
+        self.app_dispatcher = JobApplicationDispatcher(storage=self.storage, engine=self)
         self.sources: list[BaseJobSource] = [
             RemotiveSource(),
             WeWorkRemotelySource(),
@@ -324,6 +326,18 @@ class HunterEngine:
             if match.hiring_manager_url and not job.hiring_manager_url:
                 job.hiring_manager_url = match.hiring_manager_url
 
+            # Resolución automática de correo de selección si no está presente
+            if not job.contact_email:
+                found_email, source = await self.email_finder.resolve_contact_email(
+                    company=job.company,
+                    job_url=job.url,
+                    recruiter_name=job.hiring_manager_name,
+                    description=job.description,
+                )
+                if found_email:
+                    job.contact_email = found_email
+                    logger.info(f"Email de contacto resuelto automáticamente para '{job.company}': {found_email} (fuente: {source})")
+
             # Si el modelo determinó DESCARTAR o incompatibilidad legal/geográfica
             if match.score <= 35 or match.verdict == "DESCARTAR":
                 job.status = JobStatus.DISCARDED
@@ -367,6 +381,18 @@ class HunterEngine:
             job.hiring_manager_title = match.hiring_manager_title
         if match.hiring_manager_url and not job.hiring_manager_url:
             job.hiring_manager_url = match.hiring_manager_url
+
+        # Resolución automática de correo de selección si no está presente
+        if not job.contact_email:
+            found_email, source = await self.email_finder.resolve_contact_email(
+                company=job.company,
+                job_url=job.url,
+                recruiter_name=job.hiring_manager_name,
+                description=job.description,
+            )
+            if found_email:
+                job.contact_email = found_email
+                logger.info(f"Email de contacto resuelto automáticamente para '{job.company}': {found_email} (fuente: {source})")
 
         if match.score <= 35 or match.verdict == "DESCARTAR":
             job.status = JobStatus.DISCARDED
