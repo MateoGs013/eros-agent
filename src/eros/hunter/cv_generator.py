@@ -566,10 +566,12 @@ Generá el JSON del CV adaptado siguiendo estrictamente las instrucciones del si
         esc_portfolio = html.escape(cv.portfolio)
         esc_linkedin = html.escape(cv.linkedin)
         esc_github = html.escape(cv.github)
-        safe_lang = "es" if str(cv.language).strip().lower() == "es" else "en"
+
+        plain_text = self.render_plain_text(cv)
+        esc_plain_text = plain_text.replace("</script>", "<\\/script>")
 
         return f"""<!doctype html>
-<html lang="{safe_lang}">
+<html lang="{cv.language}">
 <head>
 <meta charset="utf-8">
 <title>{esc_name} — Curriculum Vitae</title>
@@ -585,26 +587,61 @@ Generá el JSON del CV adaptado siguiendo estrictamente las instrucciones del si
     padding: 0;
   }}
   body {{
-    font-family: times, 'times new roman', serif;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Calibri", "Helvetica Neue", Arial, sans-serif;
     color: #111111;
-    background: #ffffff;
+    background: #0c0d10;
+    margin: 0;
+    padding: 0;
     font-size: 8.85pt;
     line-height: 1.28;
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }}
+  .cv-canvas-wrap {{
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    padding: 32px 16px 56px;
+    background: #0c0d10;
+    min-height: calc(100vh - 53px);
+    box-sizing: border-box;
+  }}
   .cv-page {{
-    max-width: 210mm;
+    width: 210mm;
+    min-height: 297mm;
     margin: 0 auto;
     padding: 8mm 12mm;
     background: #ffffff;
+    border-radius: 2px;
+    box-shadow: 0 30px 60px -15px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.08);
+    box-sizing: border-box;
+    position: relative;
   }}
   @media print {{
-    .cv-page {{
-      padding: 0;
-      max-width: 100%;
+    html, body {{
+      background: #ffffff !important;
+      color: #000000 !important;
+      padding: 0 !important;
+      margin: 0 !important;
+      min-height: auto !important;
     }}
-    .no-print {{
+    .cv-canvas-wrap {{
+      padding: 0 !important;
+      margin: 0 !important;
+      background: transparent !important;
+      display: block !important;
+    }}
+    .cv-page {{
+      padding: 0 !important;
+      margin: 0 !important;
+      width: 100% !important;
+      max-width: 100% !important;
+      min-height: auto !important;
+      border-radius: 0 !important;
+      box-shadow: none !important;
+      background: #ffffff !important;
+    }}
+    .no-print, .no-print-toolbar, .ats-toast {{
       display: none !important;
     }}
   }}
@@ -615,26 +652,134 @@ Generá el JSON del CV adaptado siguiendo estrictamente las instrucciones del si
     display: flex;
     justify-content: space-between;
     align-items: center;
-    background: #111111;
-    color: #ffffff;
-    padding: 10px 20px;
-    font-family: ui-monospace, monospace;
-    font-size: 13px;
-    border-bottom: 2px solid #ff3e00;
+    background: rgba(15, 17, 23, 0.85);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    color: #f4f4f5;
+    padding: 10px 24px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    font-size: 12px;
+    box-sizing: border-box;
+    gap: 16px;
   }}
-  .btn-print {{
-    background: #ff3e00;
+  .toolbar-left {{
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }}
+  .toolbar-brand {{
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
     color: #ffffff;
-    border: none;
-    padding: 8px 16px;
-    font-size: 13px;
-    font-weight: 600;
-    border-radius: 4px;
+    font-size: 12px;
+  }}
+  .toolbar-brand-sep {{
+    color: rgba(255, 255, 255, 0.25);
+    font-weight: 400;
+  }}
+  .toolbar-brand-sub {{
+    color: #a1a1aa;
+    font-weight: 500;
+    font-size: 11px;
+    letter-spacing: 0.03em;
+  }}
+  .toolbar-badge {{
+    display: inline-flex;
+    align-items: center;
+    padding: 2.5px 8px;
+    border-radius: 9999px;
+    font-size: 10.5px;
+    font-weight: 500;
+    color: #a1a1aa;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    white-space: nowrap;
+    letter-spacing: 0.02em;
+  }}
+  .toolbar-actions {{
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }}
+  .btn-action {{
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    font-size: 11.5px;
+    font-weight: 500;
+    border-radius: 6px;
     cursor: pointer;
     font-family: inherit;
+    transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+    user-select: none;
+    text-decoration: none;
+    line-height: 1.4;
+    white-space: nowrap;
   }}
-  .btn-print:hover {{
-    background: #ff551c;
+  .btn-action:active {{
+    transform: scale(0.97);
+  }}
+  .btn-primary {{
+    background: rgba(255, 255, 255, 0.12);
+    color: #ffffff;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  }}
+  .btn-primary:hover {{
+    background: rgba(255, 255, 255, 0.18);
+    border-color: rgba(255, 255, 255, 0.32);
+    color: #ffffff;
+  }}
+  .btn-secondary {{
+    background: rgba(255, 255, 255, 0.04);
+    color: #d4d4d8;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+  }}
+  .btn-secondary:hover {{
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.16);
+    color: #ffffff;
+  }}
+  .ats-toast {{
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    z-index: 1000;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(18, 20, 26, 0.95);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    color: #f4f4f5;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 11.5px;
+    padding: 8px 14px;
+    border-radius: 6px;
+    box-shadow: 0 16px 32px -8px rgba(0,0,0,0.6);
+    opacity: 0;
+    transform: translateY(8px);
+    pointer-events: none;
+    transition: opacity 0.18s cubic-bezier(0.16, 1, 0.3, 1), transform 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  }}
+  .ats-toast.visible {{
+    opacity: 1;
+    transform: translateY(0);
+  }}
+  .ats-toast-dot {{
+    width: 6px;
+    height: 6px;
+    border-radius: 9999px;
+    background: #10b981;
+    box-shadow: 0 0 8px rgba(16, 185, 129, 0.6);
   }}
   
   /* Cabecera Harvard */
@@ -773,56 +918,146 @@ Generá el JSON del CV adaptado siguiendo estrictamente las instrucciones del si
 </head>
 <body>
   <div class="no-print no-print-toolbar">
-    <div>
-      <strong>EROS AGENT</strong> // TAILORED ATS RESUME GENERATOR
+    <div class="toolbar-left">
+      <div class="toolbar-brand">
+        <span>EROS</span>
+        <span class="toolbar-brand-sep">//</span>
+        <span class="toolbar-brand-sub">TAILORED ATS RESUME</span>
+      </div>
+      <span class="toolbar-badge">A4 · 210 × 297 mm</span>
+      <span class="toolbar-badge">Harvard ATS 1-Page</span>
     </div>
-    <div>
-      <button class="btn-print" onclick="window.print()">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle; margin-right: 6px;"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
-        Descargar / Imprimir en PDF (A4)
+    <div class="toolbar-actions">
+      <button type="button" class="btn-action btn-primary" onclick="downloadNativePdf()" title="Descargar archivo PDF nativo compilado">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        Descargar PDF Nativo
+      </button>
+      <button type="button" class="btn-action btn-secondary" onclick="window.print()" title="Imprimir o exportar mediante diálogo A4 del sistema">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+        Imprimir en A4
+      </button>
+      <button type="button" class="btn-action btn-secondary" onclick="copyPlainTextAts()" title="Copiar texto plano estructurado para formularios ATS">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+        Copiar Texto Plano ATS
       </button>
     </div>
   </div>
 
-  <main class="cv-page">
-    <header class="cv-header">
-      <h1 class="cv-name">{esc_name}</h1>
-      <div class="cv-title">{esc_title}</div>
-      <div class="cv-contact">
-        <span>{esc_location}</span>
-        <span class="sep">·</span>
-        <a href="mailto:{esc_email}">{esc_email}</a>
-        <span class="sep">·</span>
-        <a href="{esc_portfolio}" target="_blank">mateogs.tech</a>
-        <span class="sep">·</span>
-        <a href="{esc_linkedin}" target="_blank">LinkedIn</a>
-        <span class="sep">·</span>
-        <a href="{esc_github}" target="_blank">GitHub</a>
-      </div>
-    </header>
+  <div id="ats-toast" class="ats-toast no-print" role="status" aria-live="polite">
+    <span class="ats-toast-dot"></span>
+    <span id="ats-toast-msg">Texto ATS copiado al portapapeles</span>
+  </div>
 
-    <section class="cv-section">
-      <h2 class="section-title">{summary_title}</h2>
-      <p class="cv-summary">{esc_summary}</p>
-    </section>
+  <div class="cv-canvas-wrap">
+    <main class="cv-page" id="cv-print-area">
+      <header class="cv-header">
+        <h1 class="cv-name">{esc_name}</h1>
+        <div class="cv-title">{esc_title}</div>
+        <div class="cv-contact">
+          <span>{esc_location}</span>
+          <span class="sep">·</span>
+          <a href="mailto:{esc_email}">{esc_email}</a>
+          <span class="sep">·</span>
+          <a href="{esc_portfolio}" target="_blank">mateogs.tech</a>
+          <span class="sep">·</span>
+          <a href="{esc_linkedin}" target="_blank">LinkedIn</a>
+          <span class="sep">·</span>
+          <a href="{esc_github}" target="_blank">GitHub</a>
+        </div>
+      </header>
 
-    <section class="cv-section">
-      <h2 class="section-title">{skills_title}</h2>
-      {skills_html}
-    </section>
+      <section class="cv-section">
+        <h2 class="section-title">{summary_title}</h2>
+        <p class="cv-summary">{esc_summary}</p>
+      </section>
 
-    <section class="cv-section">
-      <h2 class="section-title">{exp_title}</h2>
-      {experience_html}
-    </section>
+      <section class="cv-section">
+        <h2 class="section-title">{skills_title}</h2>
+        {skills_html}
+      </section>
 
-    <section class="cv-section">
-      <h2 class="section-title">{edu_title}</h2>
-      {education_html}
-    </section>
+      <section class="cv-section">
+        <h2 class="section-title">{exp_title}</h2>
+        {experience_html}
+      </section>
 
-    {extra_sections_html}
-  </main>
+      <section class="cv-section">
+        <h2 class="section-title">{edu_title}</h2>
+        {education_html}
+      </section>
+
+      {extra_sections_html}
+    </main>
+  </div>
+
+  <script id="ats-plain-text-data" type="text/plain">{esc_plain_text}</script>
+  <script>
+    function showAtsToast(msg) {{
+      var toast = document.getElementById('ats-toast');
+      var label = document.getElementById('ats-toast-msg');
+      if (!toast) return;
+      if (label && msg) label.textContent = msg;
+      toast.classList.add('visible');
+      clearTimeout(window.__atsToastTimer);
+      window.__atsToastTimer = setTimeout(function() {{
+        toast.classList.remove('visible');
+      }}, 2400);
+    }}
+
+    function copyPlainTextAts() {{
+      var raw = '';
+      var el = document.getElementById('ats-plain-text-data');
+      if (el) {{
+        raw = el.textContent || '';
+      }}
+      if (!raw) {{
+        var page = document.querySelector('.cv-page');
+        raw = page ? page.innerText : '';
+      }}
+      if (navigator.clipboard && navigator.clipboard.writeText) {{
+        navigator.clipboard.writeText(raw).then(function() {{
+          showAtsToast('Texto ATS copiado al portapapeles');
+        }}).catch(function() {{
+          fallbackCopy(raw);
+        }});
+      }} else {{
+        fallbackCopy(raw);
+      }}
+    }}
+
+    function fallbackCopy(text) {{
+      var ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      try {{
+        document.execCommand('copy');
+        showAtsToast('Texto ATS copiado al portapapeles');
+      }} catch(e) {{
+        showAtsToast('Error al copiar al portapapeles');
+      }}
+      document.body.removeChild(ta);
+    }}
+
+    function downloadNativePdf() {{
+      var loc = window.location.href;
+      if (loc.indexOf('/html') !== -1) {{
+        var pdfUrl = loc.replace('/html', '/pdf');
+        pdfUrl += (pdfUrl.indexOf('?') !== -1 ? '&' : '?') + 'download=true';
+        var a = document.createElement('a');
+        a.href = pdfUrl;
+        a.download = 'CV_Mateo_Sonzogni_Harvard_ATS.pdf';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      }} else {{
+        window.print();
+      }}
+    }}
+  </script>
 </body>
 </html>
 """
