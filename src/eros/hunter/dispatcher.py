@@ -283,29 +283,11 @@ class JobApplicationDispatcher:
             "applied_at": now_iso,
         }
 
-        webhook_url = (self.settings.n8n_application_webhook_url or self.settings.n8n_webhook_url).strip()
+        app_webhook_url = (self.settings.n8n_application_webhook_url or (self.settings.n8n_webhook_url if channel == "n8n" else "")).strip()
         provider = "local"
 
-        # 1. Opción A: Webhook de n8n
-        if channel in ["auto", "n8n"] and webhook_url:
-            logger.info(f"Despachando postulación para '{job.title}' ({recipient_email}) a n8n: {webhook_url}")
-            async with httpx.AsyncClient(timeout=25.0) as client:
-                try:
-                    resp = await client.post(webhook_url, json=payload_n8n)
-                    if resp.status_code in [200, 201, 202, 204]:
-                        provider = "n8n"
-                    else:
-                        logger.error(f"n8n respondió HTTP {resp.status_code}: {resp.text[:200]}")
-                        return {
-                            "ok": False,
-                            "error": f"Fallo al despachar en n8n (HTTP {resp.status_code}): {resp.text[:150]}"
-                        }
-                except Exception as e:
-                    logger.error(f"Error de conexión con n8n al postular: {e}")
-                    return {"ok": False, "error": f"Error de red al conectar con n8n: {str(e)}"}
-
-        # 2. Opción B: SMTP Directo
-        elif channel in ["auto", "smtp"] and self.settings.smtp_host:
+        # 1. Opción A: SMTP Directo (prioridad máxima en modo 'auto' o 'smtp' cuando hay credenciales de correo)
+        if (channel in ["auto", "smtp"] and self.settings.smtp_host) and channel != "n8n":
             logger.info(f"Despachando postulación para '{job.title}' ({recipient_email}) vía SMTP directo con adjunto PDF...")
             try:
                 def _send_sync_smtp():
@@ -338,6 +320,24 @@ class JobApplicationDispatcher:
             except Exception as e:
                 logger.error(f"Falla al enviar correo vía SMTP: {e}")
                 return {"ok": False, "error": f"Falla de conexión SMTP: {str(e)}"}
+
+        # 2. Opción B: Webhook de n8n (si se seleccionó explícitamente 'n8n' o si en 'auto' no hay SMTP pero sí n8n de aplicaciones)
+        elif (channel == "n8n" or (channel == "auto" and app_webhook_url)) and app_webhook_url:
+            logger.info(f"Despachando postulación para '{job.title}' ({recipient_email}) a n8n: {app_webhook_url}")
+            async with httpx.AsyncClient(timeout=25.0) as client:
+                try:
+                    resp = await client.post(app_webhook_url, json=payload_n8n)
+                    if resp.status_code in [200, 201, 202, 204]:
+                        provider = "n8n"
+                    else:
+                        logger.error(f"n8n respondió HTTP {resp.status_code}: {resp.text[:200]}")
+                        return {
+                            "ok": False,
+                            "error": f"Fallo al despachar en n8n (HTTP {resp.status_code}): {resp.text[:150]}"
+                        }
+                except Exception as e:
+                    logger.error(f"Error de conexión con n8n al postular: {e}")
+                    return {"ok": False, "error": f"Error de red al conectar con n8n: {str(e)}"}
 
         else:
             # Modo local / simulación si no hay proveedores de envío activos
