@@ -238,9 +238,9 @@ class JobApplicationDispatcher:
             }
 
         # 5. Sanitizar final_subject quitando \r\n
-        raw_subject = custom_subject or preview["subject"]
+        raw_subject = (custom_subject or preview.get("subject") or (f"Application: {job.title} — Mateo Sonzogni" if is_en else f"Postulación: {job.title} — Mateo Gabriel Sonzogni")).strip()
         final_subject = raw_subject.replace("\r", " ").replace("\n", " ").strip()
-        final_body = custom_body or preview["body"]
+        final_body = (custom_body or preview.get("body", "")).strip()
         now_iso = datetime.now(timezone.utc).isoformat()
 
         # Generar o cargar CV en texto plano para el payload
@@ -254,6 +254,11 @@ class JobApplicationDispatcher:
                 pass
         if not tailored_cv:
             tailored_cv = self.cv_gen._build_fallback_cv(profile, job)
+            try:
+                job.tailored_cv = json.dumps(tailored_cv.model_dump())
+                await self.storage.save_job(job)
+            except Exception as e:
+                logger.warning(f"No se pudo persistir tailored_cv generado en storage: {e}")
 
         cv_plain_text = self.cv_gen.render_plain_text(tailored_cv)
         pdf_bytes = self.cv_gen.render_pdf(tailored_cv)
