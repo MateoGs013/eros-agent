@@ -233,7 +233,7 @@ class EmailFinder:
 
         try:
             async with httpx.AsyncClient(timeout=8.0) as client:
-                # 1. Si hay nombre de reclutador, intentar /email-finder primero
+                # 1. Prioridad Máxima: Si hay reclutador/hiring lead, buscar su correo personal
                 if recruiter_name and recruiter_name.strip():
                     url = "https://api.hunter.io/v2/email-finder"
                     params: dict[str, Any] = {
@@ -254,38 +254,48 @@ class EmailFinder:
                         position = (data.get("position") or "").lower()
                         if email:
                             is_hr = any(h in position for h in HR_DEPARTMENTS)
-                            if score >= 60 or is_hr:
+                            if score >= 50 or is_hr:
                                 return email
 
-                # 2. Consultar /domain-search con type=generic
+                # 2. Prioridad Alta: Buscar personas reales del departamento de Talento / HR en /domain-search (type=personal)
                 url = "https://api.hunter.io/v2/domain-search"
                 params = {
                     "domain": domain,
                     "api_key": api_key,
-                    "type": "generic",
+                    "department": "human_resources",
+                    "type": "personal",
+                    "limit": 5,
                 }
                 resp = await client.get(url, params=params)
                 if resp.status_code == 200:
                     data = resp.json().get("data", {})
                     emails = data.get("emails", [])
-
-                    # Prioridad 1: emails con prefijo de empleo o departamento hr/recruiting
-                    for item in emails:
-                        val = (item.get("value") or item.get("email") or "").strip().lower()
-                        if not val or "@" not in val:
-                            continue
-                        prefix = val.split("@")[0]
-                        dept = (item.get("department") or "").lower()
-                        if prefix in EMPLOYMENT_PREFIXES or any(h in dept for h in HR_DEPARTMENTS):
-                            return val
-
-                    # Prioridad 2: cualquier correo genérico con score >= 60
+                    # Buscar la persona de HR con mayor score
                     for item in emails:
                         val = (item.get("value") or item.get("email") or "").strip().lower()
                         if not val or "@" not in val:
                             continue
                         score = item.get("confidence") or item.get("score") or 0
                         if score >= 60:
+                            logger.info(f"Hunter.io encontró recruiter personal para '{domain}': {val} (score: {score}%)")
+                            return val
+
+                # 3. Prioridad Media: Si no hay nadie específico de HR en Hunter.io, buscar cualquier correo de empleo con prefijo oficial
+                params_generic = {
+                    "domain": domain,
+                    "api_key": api_key,
+                    "type": "generic",
+                }
+                resp_gen = await client.get(url, params=params_generic)
+                if resp_gen.status_code == 200:
+                    data = resp_gen.json().get("data", {})
+                    emails = data.get("emails", [])
+                    for item in emails:
+                        val = (item.get("value") or item.get("email") or "").strip().lower()
+                        if not val or "@" not in val:
+                            continue
+                        prefix = val.split("@")[0]
+                        if prefix in EMPLOYMENT_PREFIXES:
                             return val
         except Exception as e:
             logger.warning(f"Error al consultar Hunter.io para dominio '{domain}': {e}")
