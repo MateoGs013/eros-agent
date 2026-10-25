@@ -14,6 +14,7 @@ import httpx
 from eros.config import get_settings
 from eros.db.storage import JobStorage
 from eros.hunter.cv_generator import CVGenerator
+from eros.hunter.email_finder import EmailFinder
 from eros.hunter.pitch import PitchGenerator
 from eros.models import JobOffer, JobStatus, ProfileContext
 
@@ -23,9 +24,11 @@ logger = logging.getLogger(__name__)
 class JobApplicationDispatcher:
     """Despachador automatizado de postulaciones laborales vía n8n, SMTP o webhook."""
 
-    def __init__(self, storage: JobStorage | None = None):
+    def __init__(self, storage: JobStorage | None = None, engine: Any = None):
         self.storage = storage or JobStorage()
         self.settings = get_settings()
+        self.engine = engine
+        self.email_finder = EmailFinder(self.settings)
         self.cv_gen = CVGenerator()
         self.pitch_gen = PitchGenerator()
 
@@ -57,6 +60,23 @@ class JobApplicationDispatcher:
         job = await self.storage.get_job(job_id)
         if not job:
             return {"ok": False, "error": f"Vacante {job_id} no encontrada"}
+
+        # Si la vacante no tiene contact_email, intentar resolverlo al vuelo antes de responder
+        if not job.contact_email:
+            finder = getattr(self.engine, "email_finder", self.email_finder)
+            if finder:
+                found_email, source = await finder.resolve_contact_email(
+                    company=job.company,
+                    job_url=job.url,
+                    recruiter_name=job.hiring_manager_name,
+                    description=job.description,
+                )
+                if found_email:
+                    job.contact_email = found_email
+                    await self.storage.update_job_contact_email(job.id, found_email)
+                    logger.info(
+                        f"Email resuelto al vuelo en preview para '{job.company}': {found_email} (fuente: {source})"
+                    )
 
         profile = await self._get_profile()
         is_en = self._is_english(job)

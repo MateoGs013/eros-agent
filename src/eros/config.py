@@ -44,6 +44,7 @@ class Settings(BaseSettings):
         "gemini-3.8-flash",
     ]
     anthropic_api_key: str = ""
+    hunter_io_api_key: str = ""
 
     # n8n Automation Webhooks
     n8n_webhook_url: str = ""
