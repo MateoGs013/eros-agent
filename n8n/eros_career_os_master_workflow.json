@@ -6,7 +6,8 @@
         "httpMethod": "POST",
         "path": "eros-content",
         "responseMode": "responseNode",
-        "options": {}
+        "options": {},
+        "authentication": "headerAuth"
       },
       "id": "webhook-trigger",
       "name": "Webhook: /webhook/eros-content",
@@ -16,7 +17,13 @@
         220,
         300
       ],
-      "webhookId": "eros-content"
+      "webhookId": "eros-content",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "Eros → n8n (Header X-N8N-Secret = N8N_WEBHOOK_SECRET)"
+        }
+      }
     },
     {
       "parameters": {
@@ -187,7 +194,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"author\": \"urn:li:person:{{ $credentials.linkedinOAuth2.personId }}\",\n  \"lifecycleState\": \"PUBLISHED\",\n  \"specificContent\": {\n    \"com.linkedin.ugc.ShareContent\": {\n      \"shareCommentary\": {\n        \"text\": $json.body.linkedin_post || $json.linkedin_post || $json.body.hook\n      },\n      \"shareMediaCategory\": \"NONE\"\n    }\n  },\n  \"visibility\": {\n    \"com.linkedin.ugc.MemberNetworkVisibility\": \"PUBLIC\"\n  }\n}",
+        "jsonBody": "={\n  \"author\": \"urn:li:person:{{ $credentials.linkedinOAuth2.personId }}\",\n  \"lifecycleState\": \"PUBLISHED\",\n  \"specificContent\": {\n    \"com.linkedin.ugc.ShareContent\": {\n      \"shareCommentary\": {\n        \"text\": {{ JSON.stringify($('Webhook: /webhook/eros-content').item.json.body.linkedin_post) }}\n      },\n      \"shareMediaCategory\": \"NONE\"\n    }\n  },\n  \"visibility\": {\n    \"com.linkedin.ugc.MemberNetworkVisibility\": \"PUBLIC\"\n  }\n}",
         "options": {}
       },
       "id": "linkedin-publish-post",
@@ -218,7 +225,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"actor\": \"urn:li:person:{{ $credentials.linkedinOAuth2.personId }}\",\n  \"message\": {\n    \"text\": $('Respuesta Inmediata Webhook').item.json.body.first_comment || \"Portafolio y arquitectura: https://mateogs.tech\"\n  }\n}",
+        "jsonBody": "={\n  \"actor\": \"urn:li:person:{{ $credentials.linkedinOAuth2.personId }}\",\n  \"message\": {\n    \"text\": {{ JSON.stringify($('Webhook: /webhook/eros-content').item.json.body.first_comment || 'Portafolio y arquitectura: https://mateogs.tech') }}\n  }\n}",
         "options": {}
       },
       "id": "linkedin-first-comment",
@@ -238,7 +245,7 @@
         "genericAuthType": "oAuth1Api",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"text\": $json.body.twitter_thread && $json.body.twitter_thread.length > 0 ? $json.body.twitter_thread[0] : ($json.body.hook || 'Nuevo analisis de arquitectura en https://mateogs.tech')\n}",
+        "jsonBody": "={\n  \"text\": {{ JSON.stringify($('Webhook: /webhook/eros-content').item.json.body.twitter_thread[0]) }}\n}",
         "options": {}
       },
       "id": "twitter-publish-thread",
@@ -247,6 +254,126 @@
       "typeVersion": 4.2,
       "position": [
         720,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "if-channel-linkedin-cond",
+              "leftValue": "={{ ['all', 'linkedin'].includes($('Webhook: /webhook/eros-content').item.json.body.channel || 'all') }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-channel-linkedin",
+      "name": "¿Canal LinkedIn?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        590,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "if-channel-twitter-cond",
+              "leftValue": "={{ ['all', 'twitter'].includes($('Webhook: /webhook/eros-content').item.json.body.channel || 'all') }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-channel-twitter",
+      "name": "¿Canal X?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        590,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Webhook: /webhook/eros-content').item.json.body.callback_url || 'https://eros.mateogs.tech/api/webhooks/n8n/callback' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-N8N-Secret",
+              "value": "={{ $env.N8N_WEBHOOK_SECRET }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"post_id\": \"{{ $('Webhook: /webhook/eros-content').item.json.body.post_id }}\",\n  \"status\": \"published\",\n  \"channel\": \"linkedin\"\n}",
+        "options": {}
+      },
+      "id": "callback-linkedin",
+      "name": "Eros: Confirmar LinkedIn",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1240,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Webhook: /webhook/eros-content').item.json.body.callback_url || 'https://eros.mateogs.tech/api/webhooks/n8n/callback' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-N8N-Secret",
+              "value": "={{ $env.N8N_WEBHOOK_SECRET }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"post_id\": \"{{ $('Webhook: /webhook/eros-content').item.json.body.post_id }}\",\n  \"status\": \"published\",\n  \"channel\": \"twitter\"\n}",
+        "options": {}
+      },
+      "id": "callback-twitter",
+      "name": "Eros: Confirmar X",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        980,
         420
       ]
     }
@@ -267,12 +394,12 @@
       "main": [
         [
           {
-            "node": "LinkedIn: Publicar Post Principal",
+            "node": "¿Canal LinkedIn?",
             "type": "main",
             "index": 0
           },
           {
-            "node": "X / Twitter: Publicar Hook / Tweet 1",
+            "node": "¿Canal X?",
             "type": "main",
             "index": 0
           }
@@ -328,6 +455,52 @@
         [
           {
             "node": "Eros: Escanear & Notificar Vacantes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Canal LinkedIn?": {
+      "main": [
+        [
+          {
+            "node": "LinkedIn: Publicar Post Principal",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "¿Canal X?": {
+      "main": [
+        [
+          {
+            "node": "X / Twitter: Publicar Hook / Tweet 1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "LinkedIn: Primer Comentario (Link)": {
+      "main": [
+        [
+          {
+            "node": "Eros: Confirmar LinkedIn",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "X / Twitter: Publicar Hook / Tweet 1": {
+      "main": [
+        [
+          {
+            "node": "Eros: Confirmar X",
             "type": "main",
             "index": 0
           }
