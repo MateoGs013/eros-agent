@@ -3,6 +3,7 @@ import base64
 import email.utils
 import json
 import logging
+import socket
 import ssl
 from datetime import datetime, timezone
 import smtplib
@@ -14,15 +15,49 @@ import httpx
 from eros.config import get_settings
 from eros.db.storage import JobStorage
 from eros.hunter.cv_generator import CVGenerator
-from eros.hunter.email_finder import EmailFinder
+from eros.hunter.email_finder import (
+    EMAIL_SOURCE_MANUAL,
+    EMAIL_SOURCE_POSTING,
+    EMAIL_SOURCE_UNKNOWN,
+    VERIFIED_EMAIL_SOURCES,
+    EmailFinder,
+)
 from eros.hunter.pitch import PitchGenerator
-from eros.models import JobOffer, JobStatus, ProfileContext
+from eros.integrations.llm import LLMOutputError, LLMUnavailableError
+from eros.models import JobOffer, JobStatus, ProfileContext, TailoredCV
+from eros.security import cv_public_url
 
 logger = logging.getLogger(__name__)
 
+APPLY_CHANNELS = ("auto", "n8n", "smtp")
+
+# Errores de SMTP que garantizan que el correo NO salió (se puede reintentar sin duplicar)
+_SMTP_DEFINITE_FAILURES = (
+    smtplib.SMTPAuthenticationError,
+    smtplib.SMTPSenderRefused,
+    smtplib.SMTPRecipientsRefused,
+    smtplib.SMTPHeloError,
+    smtplib.SMTPNotSupportedError,
+    smtplib.SMTPConnectError,
+    ConnectionRefusedError,
+    socket.gaierror,
+)
+
+
+def _error(code: str, message: str, **extra: Any) -> dict[str, Any]:
+    return {"ok": False, "error_code": code, "error": message, **extra}
+
 
 class JobApplicationDispatcher:
-    """Despachador automatizado de postulaciones laborales vía n8n, SMTP o webhook."""
+    """Despachador de postulaciones por correo vía el webhook de postulaciones de n8n o SMTP.
+
+    Garantías:
+    - Solo usa correos con fuente real (aviso, sitio de la empresa, Hunter.io o escrito a mano).
+    - Marca «enviando» de forma atómica antes de enviar: dos pedidos simultáneos no mandan dos correos.
+    - Manda una clave de idempotencia estable por vacante (header Idempotency-Key) a n8n.
+    - Sin proveedor configurado no registra la postulación ni responde ok.
+    - Nunca usa el webhook de contenido para postulaciones.
+    """
 
     def __init__(self, storage: JobStorage | None = None, engine: Any = None):
         self.storage = storage or JobStorage()
@@ -55,13 +90,23 @@ class JobApplicationDispatcher:
         ]
         return not any(w in text for w in es_keywords)
 
+    def _default_subject(self, job: JobOffer, is_en: bool) -> str:
+        if is_en:
+            return f"Application: {job.title} — Mateo Sonzogni"
+        return f"Postulación: {job.title} — Mateo Gabriel Sonzogni"
+
+    @staticmethod
+    def idempotency_key(job_id: str) -> str:
+        """Clave estable por vacante: un mismo aviso se postula una sola vez."""
+        return f"apply-{job_id}"
+
     async def get_application_preview(self, job_id: str) -> dict[str, Any]:
         """Genera una vista previa completa del asunto, cuerpo y enlaces de la postulación."""
         job = await self.storage.get_job(job_id)
         if not job:
             return {"ok": False, "error": f"Vacante {job_id} no encontrada"}
 
-        # Si la vacante no tiene contact_email, intentar resolverlo al vuelo antes de responder
+        # Si la vacante no tiene contact_email, buscar uno real (nunca adivinado) antes de responder
         if not job.contact_email:
             finder = getattr(self.engine, "email_finder", self.email_finder)
             if finder:
@@ -73,22 +118,19 @@ class JobApplicationDispatcher:
                 )
                 if found_email:
                     job.contact_email = found_email
-                    await self.storage.update_job_contact_email(job.id, found_email)
+                    job.contact_email_source = source
+                    await self.storage.update_job_contact_email(job.id, found_email, source=source)
                     logger.info(
                         f"Email resuelto al vuelo en preview para '{job.company}': {found_email} (fuente: {source})"
                     )
 
         profile = await self._get_profile()
         is_en = self._is_english(job)
+        subject = self._default_subject(job, is_en)
 
-        # 1. Asunto predeterminado
-        if is_en:
-            subject = f"Application: {job.title} — Mateo Sonzogni"
-        else:
-            subject = f"Postulación: {job.title} — Mateo Gabriel Sonzogni"
-
-        # 2. Obtener o generar Pitch / Elevator pitch
+        # Pitch: el guardado, uno nuevo de la IA, o (sin IA) una frase genérica marcada como plantilla
         pitch_content = ""
+        pitch_source = "stored"
         if job.pitch_draft:
             try:
                 pitch_json = json.loads(job.pitch_draft)
@@ -99,21 +141,22 @@ class JobApplicationDispatcher:
             try:
                 draft = await self.pitch_gen.generate_pitch(job, profile)
                 pitch_content = draft.cover_letter or draft.elevator_pitch
-            except Exception as e:
-                logger.warning(f"Error generando pitch para preview: {e}")
+                pitch_source = "llm"
+            except (LLMUnavailableError, LLMOutputError) as e:
+                logger.warning(f"Sin pitch de IA para preview ({e}); usando plantilla genérica.")
+                pitch_source = "template"
                 pitch_content = (
-                    "I am writing to express my strong interest in the open position. "
-                    "My background in full stack web development and robust backend systems "
-                    "aligns closely with your technical requirements."
+                    "I am writing to apply for this position. "
+                    "You can find my production work and the details of each project in my portfolio."
                     if is_en else
-                    "Me pongo en contacto para presentar mi postulación a la búsqueda. "
-                    "Mi perfil en desarrollo full stack y arquitectura backend en producción "
-                    "se alinea de forma directa con los desafíos del puesto."
+                    "Les escribo para postularme a la búsqueda. "
+                    "En mi portafolio están los proyectos en producción y el detalle de cada uno."
                 )
 
-        cv_html_url = f"https://eros.mateogs.tech/api/jobs/{job.id}/cv/html"
+        cv_html_url = cv_public_url(job.id, "html") if job.tailored_cv else None
+        cv_line_en = f"ATS Resume (Harvard Single-Page Format):\n{cv_html_url}\n\n" if cv_html_url else ""
+        cv_line_es = f"Currículum Vitae (Formato Harvard ATS):\n{cv_html_url}\n\n" if cv_html_url else ""
 
-        # 3. Construir cuerpo profesional de correo
         if is_en:
             body = (
                 f"Dear Hiring Team at {job.company},\n\n"
@@ -123,8 +166,7 @@ class JobApplicationDispatcher:
                 f"• Live Portfolio: {self.settings.candidate_portfolio_url}\n"
                 f"• LinkedIn: {self.settings.candidate_linkedin_url}\n"
                 f"• GitHub: {self.settings.candidate_github_url}\n\n"
-                f"ATS Resume (Harvard Single-Page Format):\n"
-                f"{cv_html_url}\n\n"
+                f"{cv_line_en}"
                 f"I welcome the opportunity to discuss how my technical experience can add value to your team.\n\n"
                 f"Best regards,\n\n"
                 f"{self.settings.candidate_name}\n"
@@ -140,8 +182,7 @@ class JobApplicationDispatcher:
                 f"• Portafolio en vivo: {self.settings.candidate_portfolio_url}\n"
                 f"• LinkedIn: {self.settings.candidate_linkedin_url}\n"
                 f"• GitHub: {self.settings.candidate_github_url}\n\n"
-                f"Currículum Vitae (Formato Harvard ATS):\n"
-                f"{cv_html_url}\n\n"
+                f"{cv_line_es}"
                 f"Quedo a su disposición para coordinar una breve conversación técnica.\n\n"
                 f"Saludos cordiales,\n\n"
                 f"{self.settings.candidate_name}\n"
@@ -149,29 +190,61 @@ class JobApplicationDispatcher:
                 f"{self.settings.smtp_from} | {self.settings.candidate_portfolio_url}"
             )
 
-        is_extracted = bool(
-            job.contact_email
-            and job.description
-            and job.contact_email.lower() in job.description.lower()
-        )
-
+        source = job.contact_email_source if job.contact_email else None
         return {
             "ok": True,
             "job_id": job.id,
             "job_title": job.title,
             "company": job.company,
             "contact_email": job.contact_email or "",
+            "contact_email_source": source,
+            # Verificado = publicado en el aviso o en el sitio de la empresa, o escrito a mano.
+            "contact_email_verified": source in VERIFIED_EMAIL_SOURCES,
+            "is_email_extracted": source == EMAIL_SOURCE_POSTING,
+            # Sin correo o con uno de origen desconocido, hay que escribir la dirección a mano.
+            "requires_manual_email": not job.contact_email or source == EMAIL_SOURCE_UNKNOWN,
             "subject": subject,
             "body": body,
+            "pitch_source": pitch_source,
             "cv_filename": "CV_Mateo_Sonzogni.pdf",
             "has_pdf_attachment": True,
             "cv_html_url": cv_html_url,
             "is_english": is_en,
             "status": job.status.value,
             "applied_at": job.applied_at,
-            "contact_email_verified": not is_extracted,
-            "is_email_extracted": is_extracted,
+            "send_state": job.send_state,
+            "idempotency_key": self.idempotency_key(job.id),
         }
+
+    def _pick_provider(self, channel: str) -> str | None:
+        """Elige el proveedor real de envío. None si el canal pedido no está configurado."""
+        app_webhook_url = (self.settings.n8n_application_webhook_url or "").strip()
+        smtp_host = (self.settings.smtp_host or "").strip()
+        if channel == "n8n":
+            return "n8n" if app_webhook_url else None
+        if channel == "smtp":
+            return "smtp" if smtp_host else None
+        if app_webhook_url:
+            return "n8n"
+        if smtp_host:
+            return "smtp"
+        return None
+
+    async def _load_or_build_cv(self, job: JobOffer, profile: ProfileContext) -> TailoredCV:
+        # El adjunto sigue siendo el CV de Eros (el contrato con el CV de la base del portfolio
+        # está pendiente). Si la vacante no tiene uno adaptado, va el CV base escrito a mano.
+        if job.tailored_cv:
+            try:
+                return TailoredCV.model_validate_json(job.tailored_cv)
+            except Exception:
+                pass
+        tailored_cv = self.cv_gen._build_fallback_cv(profile, job)
+        try:
+            job.tailored_cv = json.dumps(tailored_cv.model_dump())
+            await self.storage.save_job(job)
+        except Exception as e:
+            logger.warning(f"No se pudo persistir tailored_cv generado en storage: {e}")
+        return tailored_cv
 
     async def dispatch_application(
         self,
@@ -181,98 +254,174 @@ class JobApplicationDispatcher:
         custom_body: str | None = None,
         channel: str = "auto",
         confirmed: bool = False,
+        force_retry: bool = False,
     ) -> dict[str, Any]:
-        """Despacha la postulación al destinatario vía n8n o SMTP."""
+        """Despacha la postulación al destinatario vía n8n o SMTP.
+
+        Devuelve ok=True solo si un proveedor aceptó el envío. Los errores llevan
+        `error_code`: job_not_found, already_applied, send_in_progress,
+        send_outcome_unknown, missing_email, unverified_email, invalid_email,
+        requires_confirmation, invalid_channel, no_provider, provider_rejected.
+        """
         job = await self.storage.get_job(job_id)
         if not job:
-            return {"ok": False, "error": f"Vacante {job_id} no encontrada"}
+            return _error("job_not_found", f"Vacante {job_id} no encontrada")
 
-        # 1. Bloquear postulación si ya está aplicada o tiene applied_at (evitar duplicados)
         if job.status == JobStatus.APPLIED or job.applied_at:
-            return {
-                "ok": False,
-                "error": f"Postulación bloqueada: La vacante '{job.title}' ya fue postulada previamente ({job.applied_at or 'estado APPLIED'}). Evitando envío duplicado."
-            }
+            return _error(
+                "already_applied",
+                f"Postulación bloqueada: La vacante '{job.title}' ya fue postulada previamente ({job.applied_at or 'estado APPLIED'}). Evitando envío duplicado."
+            )
 
-        preview = await self.get_application_preview(job_id)
-        if not preview.get("ok"):
-            return preview
+        channel = (channel or "auto").strip().lower()
+        if channel not in APPLY_CHANNELS:
+            return _error("invalid_channel", f"Canal de envío inválido: '{channel}'. Opciones: {', '.join(APPLY_CHANNELS)}.")
 
-        raw_recipient = (to_email or job.contact_email or "").strip()
+        # 1. Destinatario y su fuente
+        explicit = (to_email or "").strip()
+        stored = (job.contact_email or "").strip()
+        raw_recipient = explicit or stored
         if not raw_recipient:
-            return {
-                "ok": False,
-                "error": "No hay un correo de contacto registrado para esta vacante. Por favor especificá uno."
-            }
+            return _error("missing_email", "No hay un correo de contacto registrado para esta vacante. Por favor especificá uno.")
 
-        # 2. Validar destinatario con email.utils.parseaddr
         _, parsed_addr = email.utils.parseaddr(raw_recipient)
         if not parsed_addr or "@" not in parsed_addr or "." not in parsed_addr.split("@")[-1]:
-            return {
-                "ok": False,
-                "error": f"El correo destinatario '{raw_recipient}' no tiene un formato válido."
-            }
+            return _error("invalid_email", f"El correo destinatario '{raw_recipient}' no tiene un formato válido.")
         recipient_email = parsed_addr.lower()
 
-        # 3. Marcar el email extraído de la descripción como no verificado y requerir confirmación
-        is_extracted = bool(
-            not to_email
-            and job.contact_email
-            and job.description
-            and job.contact_email.lower() in job.description.lower()
-        )
-        if is_extracted and not confirmed:
-            return {
-                "ok": False,
-                "requires_confirmation": True,
-                "error": f"El correo '{recipient_email}' fue extraído automáticamente de la descripción y no está verificado. Requiere confirmación explícita antes de enviar (confirmed=True)."
-            }
+        if explicit and recipient_email != stored.lower():
+            recipient_source = EMAIL_SOURCE_MANUAL
+        else:
+            recipient_source = job.contact_email_source or EMAIL_SOURCE_UNKNOWN
 
-        # 4. Requerir confirmación explícita si no está previsualizado
+        if recipient_source == EMAIL_SOURCE_UNKNOWN:
+            return _error(
+                "unverified_email",
+                f"No se sabe de dónde salió el correo '{recipient_email}'. Escribí la dirección a mano (to_email) para enviar.",
+                contact_email_source=recipient_source,
+            )
+
+        # Un correo encontrado automáticamente (aviso, sitio, Hunter.io) se usa solo con confirmación explícita.
+        if recipient_source != EMAIL_SOURCE_MANUAL and not confirmed:
+            return _error(
+                "requires_confirmation",
+                f"El correo '{recipient_email}' se encontró automáticamente (fuente: {recipient_source}). Requiere confirmación explícita antes de enviar (confirmed=True).",
+                requires_confirmation=True,
+                contact_email_source=recipient_source,
+            )
+
         is_previewed = bool(custom_subject and custom_body)
         if not confirmed and not is_previewed:
-            return {
-                "ok": False,
-                "requires_confirmation": True,
-                "error": "El envío de postulación requiere confirmación explícita previa o previsualización del contenido."
-            }
+            return _error(
+                "requires_confirmation",
+                "El envío de postulación requiere confirmación explícita previa o previsualización del contenido.",
+                requires_confirmation=True,
+            )
 
-        # 5. Sanitizar final_subject quitando \r\n
-        raw_subject = (custom_subject or preview.get("subject") or (f"Application: {job.title} — Mateo Sonzogni" if is_en else f"Postulación: {job.title} — Mateo Gabriel Sonzogni")).strip()
+        # 2. Proveedor real (sin proveedor no se registra nada)
+        provider = self._pick_provider(channel)
+        if provider is None:
+            return _error(
+                "no_provider",
+                "No hay proveedor de envío configurado para este canal (N8N_APPLICATION_WEBHOOK_URL o SMTP_HOST). "
+                "No se envió nada ni se marcó como postulada.",
+            )
+
+        # 3. Contenido (todo lo que puede fallar va antes de marcar «enviando»)
+        is_en = self._is_english(job)
+        preview = await self.get_application_preview(job_id)
+        if not preview.get("ok"):
+            return _error("job_not_found", preview.get("error", "Vacante no encontrada"))
+        raw_subject = (custom_subject or preview.get("subject") or self._default_subject(job, is_en)).strip()
         final_subject = raw_subject.replace("\r", " ").replace("\n", " ").strip()
         final_body = (custom_body or preview.get("body", "")).strip()
-        now_iso = datetime.now(timezone.utc).isoformat()
 
-        # Generar o cargar CV en texto plano para el payload
         profile = await self._get_profile()
-        tailored_cv = None
-        if job.tailored_cv:
-            try:
-                from eros.models import TailoredCV
-                tailored_cv = TailoredCV.model_validate_json(job.tailored_cv)
-            except Exception:
-                pass
-        if not tailored_cv:
-            tailored_cv = self.cv_gen._build_fallback_cv(profile, job)
-            try:
-                job.tailored_cv = json.dumps(tailored_cv.model_dump())
-                await self.storage.save_job(job)
-            except Exception as e:
-                logger.warning(f"No se pudo persistir tailored_cv generado en storage: {e}")
-
+        tailored_cv = await self._load_or_build_cv(job, profile)
         cv_plain_text = self.cv_gen.render_plain_text(tailored_cv)
         pdf_bytes = self.cv_gen.render_pdf(tailored_cv)
         pdf_base64 = base64.b64encode(pdf_bytes).decode("ascii") if pdf_bytes else ""
+        idem_key = self.idempotency_key(job.id)
 
-        payload_n8n = {
+        # 4. Marca atómica «enviando»: si otro pedido ya la tomó, este no envía.
+        claim = await self.storage.claim_send(job.id, idem_key, force_retry=force_retry)
+        if claim != "claimed":
+            messages = {
+                "applied": ("already_applied", "La vacante ya fue postulada. Evitando envío duplicado."),
+                "sending": ("send_in_progress", "Ya hay un envío en curso para esta vacante. Esperá el resultado antes de reintentar."),
+                "unknown": (
+                    "send_outcome_unknown",
+                    "Un envío anterior se cortó y no sabemos si salió. Revisá «Enviados» en Gmail: si salió, "
+                    "marcala como postulada; si no, reintentá con force_retry=true.",
+                ),
+                "missing": ("job_not_found", f"Vacante {job_id} no encontrada"),
+            }
+            code, msg = messages[claim]
+            return _error(code, msg, send_state=claim)
+
+        now_iso = datetime.now(timezone.utc).isoformat()
+        try:
+            if provider == "n8n":
+                outcome, detail = await self._send_via_n8n(job, recipient_email, final_subject, final_body,
+                                                           pdf_base64, cv_plain_text, tailored_cv,
+                                                           preview.get("cv_html_url"), idem_key, now_iso)
+            else:
+                outcome, detail = await self._send_via_smtp(recipient_email, final_subject, final_body, pdf_bytes)
+        except Exception as e:  # Cualquier sorpresa después de empezar a enviar: no sabemos si salió
+            logger.error(f"Error inesperado enviando la postulación de '{job.title}': {e}")
+            outcome, detail = "unknown", str(e)
+
+        if outcome == "sent":
+            await self.storage.record_application(job.id, recipient_email, recipient_source)
+            return {
+                "ok": True,
+                "job_id": job.id,
+                "dispatched_to": recipient_email,
+                "contact_email_source": recipient_source,
+                "provider": provider,
+                "status": JobStatus.APPLIED.value,
+                "applied_at": now_iso,
+                "idempotency_key": idem_key,
+                "message": f"Postulación enviada a {recipient_email} vía {provider.upper()}.",
+            }
+
+        if outcome == "failed":
+            await self.storage.release_send(job.id)
+            return _error("provider_rejected", f"No se envió: {detail}", provider=provider, send_state=None)
+
+        await self.storage.mark_send_unknown(job.id)
+        return _error(
+            "send_outcome_unknown",
+            f"El envío se cortó y no sabemos si salió ({detail}). Revisá «Enviados» antes de reintentar.",
+            provider=provider,
+            send_state="unknown",
+        )
+
+    async def _send_via_n8n(
+        self,
+        job: JobOffer,
+        recipient_email: str,
+        subject: str,
+        body: str,
+        pdf_base64: str,
+        cv_plain_text: str,
+        tailored_cv: TailoredCV,
+        cv_html_url: str | None,
+        idem_key: str,
+        now_iso: str,
+    ) -> tuple[str, str]:
+        """Devuelve ("sent" | "failed" | "unknown", detalle)."""
+        url = self.settings.n8n_application_webhook_url.strip()
+        payload = {
             "event": "job.application",
+            "idempotency_key": idem_key,
             "job_id": job.id,
             "job_title": job.title,
             "company": job.company,
             "job_url": job.url,
             "recipient_email": recipient_email,
-            "subject": final_subject,
-            "body": final_body,
+            "subject": subject,
+            "body": body,
             "candidate": {
                 "name": self.settings.candidate_name,
                 "email": self.settings.smtp_from,
@@ -282,90 +431,65 @@ class JobApplicationDispatcher:
             },
             "cv_filename": "CV_Mateo_Sonzogni.pdf",
             "cv_pdf_base64": pdf_base64,
-            "cv_html_url": preview["cv_html_url"],
+            "cv_html_url": cv_html_url,
             "cv_text": cv_plain_text,
             "cv_data": tailored_cv.model_dump(),
             "applied_at": now_iso,
         }
-
-        app_webhook_url = (self.settings.n8n_application_webhook_url or (self.settings.n8n_webhook_url if channel == "n8n" else "")).strip()
-        provider = "local"
-
-        # 1. Opción Primaria: Webhook de n8n con integración oficial Gmail OAuth2 (HTTPS puerto 443, inmune a bloqueos de VPS y sincronizado en 'Enviados')
-        if (channel in ["n8n", "auto"] and app_webhook_url) or channel == "n8n":
-            logger.info(f"Despachando postulación para '{job.title}' ({recipient_email}) a n8n: {app_webhook_url}")
+        headers = {"Idempotency-Key": idem_key}
+        if self.settings.n8n_webhook_secret:
+            headers["X-N8N-Secret"] = self.settings.n8n_webhook_secret
+        logger.info(f"Despachando postulación para '{job.title}' ({recipient_email}) al webhook de postulaciones de n8n.")
+        try:
             async with httpx.AsyncClient(timeout=25.0) as client:
-                try:
-                    resp = await client.post(app_webhook_url, json=payload_n8n)
-                    if resp.status_code in [200, 201, 202, 204]:
-                        provider = "n8n"
-                    else:
-                        logger.error(f"n8n respondió HTTP {resp.status_code}: {resp.text[:200]}")
-                        return {
-                            "ok": False,
-                            "error": f"Fallo al despachar en n8n (HTTP {resp.status_code}): {resp.text[:150]}"
-                        }
-                except Exception as e:
-                    logger.error(f"Error de conexión con n8n al postular: {e}")
-                    return {"ok": False, "error": f"Error de red al conectar con n8n: {str(e)}"}
+                resp = await client.post(url, json=payload, headers=headers)
+        except (httpx.ConnectError, httpx.ConnectTimeout) as e:
+            return "failed", f"no se pudo conectar con n8n: {e}"
+        except httpx.HTTPError as e:
+            return "unknown", f"n8n no respondió a tiempo: {e}"
 
-        # 2. Opción Secundaria de Contingencia: SMTP Directo (si se solicita explícitamente channel='smtp' o en auto si no hay n8n configurado)
-        elif (channel in ["auto", "smtp"] and self.settings.smtp_host):
-            logger.info(f"Despachando postulación para '{job.title}' ({recipient_email}) vía SMTP directo con adjunto PDF...")
-            try:
-                def _send_sync_smtp():
-                    msg = MIMEMultipart()
-                    msg["Subject"] = final_subject
-                    msg["From"] = self.settings.smtp_from
-                    msg["To"] = recipient_email
-                    msg.attach(MIMEText(final_body, "plain", "utf-8"))
+        if resp.status_code in (200, 201, 202, 204):
+            return "sent", f"HTTP {resp.status_code}"
+        logger.error(f"n8n respondió HTTP {resp.status_code}: {resp.text[:200]}")
+        if 400 <= resp.status_code < 500:
+            return "failed", f"n8n rechazó el pedido (HTTP {resp.status_code}): {resp.text[:150]}"
+        # Un 5xx puede llegar después de que el nodo de Gmail ya envió
+        return "unknown", f"n8n respondió HTTP {resp.status_code}: {resp.text[:150]}"
 
-                    if pdf_bytes:
-                        pdf_part = MIMEApplication(pdf_bytes, _subtype="pdf")
-                        pdf_part.add_header("Content-Disposition", "attachment", filename="CV_Mateo_Sonzogni.pdf")
-                        msg.attach(pdf_part)
+    async def _send_via_smtp(self, recipient_email: str, subject: str, body: str, pdf_bytes: bytes | None) -> tuple[str, str]:
+        """Devuelve ("sent" | "failed" | "unknown", detalle)."""
+        def _send_sync_smtp():
+            msg = MIMEMultipart()
+            msg["Subject"] = subject
+            msg["From"] = self.settings.smtp_from
+            msg["To"] = recipient_email
+            msg.attach(MIMEText(body, "plain", "utf-8"))
 
-                    ssl_ctx = ssl.create_default_context()
-                    if self.settings.smtp_port == 465:
-                        with smtplib.SMTP_SSL(self.settings.smtp_host, self.settings.smtp_port, context=ssl_ctx, timeout=15) as server:
-                            if self.settings.smtp_user and self.settings.smtp_pass:
-                                server.login(self.settings.smtp_user, self.settings.smtp_pass)
-                            server.sendmail(self.settings.smtp_from, [recipient_email], msg.as_string())
-                    else:
-                        with smtplib.SMTP(self.settings.smtp_host, self.settings.smtp_port, timeout=15) as server:
-                            server.starttls(context=ssl_ctx)
-                            if self.settings.smtp_user and self.settings.smtp_pass:
-                                server.login(self.settings.smtp_user, self.settings.smtp_pass)
-                            server.sendmail(self.settings.smtp_from, [recipient_email], msg.as_string())
+            if pdf_bytes:
+                pdf_part = MIMEApplication(pdf_bytes, _subtype="pdf")
+                pdf_part.add_header("Content-Disposition", "attachment", filename="CV_Mateo_Sonzogni.pdf")
+                msg.attach(pdf_part)
 
-                await asyncio.to_thread(_send_sync_smtp)
-                provider = "smtp"
-            except Exception as e:
-                logger.error(f"Falla al enviar correo vía SMTP: {e}")
-                return {"ok": False, "error": f"Falla de conexión SMTP: {str(e)}"}
+            ssl_ctx = ssl.create_default_context()
+            if self.settings.smtp_port == 465:
+                with smtplib.SMTP_SSL(self.settings.smtp_host, self.settings.smtp_port, context=ssl_ctx, timeout=15) as server:
+                    if self.settings.smtp_user and self.settings.smtp_pass:
+                        server.login(self.settings.smtp_user, self.settings.smtp_pass)
+                    server.sendmail(self.settings.smtp_from, [recipient_email], msg.as_string())
+            else:
+                with smtplib.SMTP(self.settings.smtp_host, self.settings.smtp_port, timeout=15) as server:
+                    server.starttls(context=ssl_ctx)
+                    if self.settings.smtp_user and self.settings.smtp_pass:
+                        server.login(self.settings.smtp_user, self.settings.smtp_pass)
+                    server.sendmail(self.settings.smtp_from, [recipient_email], msg.as_string())
 
-        else:
-            # Modo local / simulación si no hay proveedores de envío activos
-            logger.info(
-                f"Modo local: Ni N8N_APPLICATION_WEBHOOK_URL ni SMTP_HOST configurados. "
-                f"Registrando postulación en base de datos para '{job.title}' ({recipient_email})."
-            )
-            provider = "local_registered"
-
-        # Registrar la postulación en SQLite
-        await self.storage.record_application(job.id, recipient_email)
-
-        return {
-            "ok": True,
-            "job_id": job.id,
-            "dispatched_to": recipient_email,
-            "provider": provider,
-            "status": JobStatus.APPLIED.value,
-            "applied_at": now_iso,
-            "message": (
-                f"Postulación enviada exitosamente a {recipient_email} vía {provider.upper()}."
-                if provider != "local_registered" else
-                f"Postulación registrada en base de datos para {recipient_email}. "
-                "Para envío de correos reales, configurá N8N_APPLICATION_WEBHOOK_URL o credenciales SMTP en .env."
-            )
-        }
+        logger.info(f"Despachando postulación a {recipient_email} vía SMTP directo con adjunto PDF...")
+        try:
+            await asyncio.to_thread(_send_sync_smtp)
+            return "sent", "SMTP"
+        except _SMTP_DEFINITE_FAILURES as e:
+            logger.error(f"SMTP rechazó el envío: {e}")
+            return "failed", f"SMTP rechazó el envío: {e}"
+        except Exception as e:
+            logger.error(f"Falla de SMTP a mitad del envío: {e}")
+            return "unknown", f"falla de SMTP a mitad del envío: {e}"

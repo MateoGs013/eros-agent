@@ -134,7 +134,7 @@ class TestPhase1Phase2Fixes(unittest.IsolatedAsyncioTestCase):
         self.assertIn("ya fue", res["error"].lower())
 
     async def test_03_extracted_email_requires_confirmation(self):
-        """Marcar el email extraído de la descripción como no verificado y requerir confirmación."""
+        """El correo publicado en el aviso es verificado (fuente posting) pero se usa solo con confirmación."""
         job = JobOffer(
             id="job-extracted-email",
             source="remotive",
@@ -147,11 +147,13 @@ class TestPhase1Phase2Fixes(unittest.IsolatedAsyncioTestCase):
         )
         await self.storage.save_job(job)
 
-        # 1. Preview marca contact_email_verified = False e is_email_extracted = True
+        # 1. Preview: publicado en el aviso → fuente posting, verificado y extraído
         preview = await self.dispatcher.get_application_preview("job-extracted-email")
         self.assertTrue(preview["ok"])
-        self.assertFalse(preview["contact_email_verified"])
+        self.assertEqual(preview["contact_email_source"], "posting")
+        self.assertTrue(preview["contact_email_verified"])
         self.assertTrue(preview["is_email_extracted"])
+        self.assertFalse(preview["requires_manual_email"])
 
         # 2. Despacho sin confirmación explícita debe ser bloqueado
         res_unconfirmed = await self.dispatcher.dispatch_application(
@@ -162,13 +164,16 @@ class TestPhase1Phase2Fixes(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(res_unconfirmed.get("requires_confirmation", False))
 
         # 3. Despacho con confirmación explícita debe proceder
-        res_confirmed = await self.dispatcher.dispatch_application(
-            job_id="job-extracted-email",
-            confirmed=True,
-            channel="local",
-        )
+        self.settings.n8n_application_webhook_url = "https://n8n.example.com/webhook/apply"
+        ok_resp = MagicMock(status_code=200, text="OK")
+        with patch("httpx.AsyncClient.post", new_callable=AsyncMock, return_value=ok_resp):
+            res_confirmed = await self.dispatcher.dispatch_application(
+                job_id="job-extracted-email",
+                confirmed=True,
+            )
         self.assertTrue(res_confirmed["ok"])
-        self.assertEqual(res_confirmed["provider"], "local_registered")
+        self.assertEqual(res_confirmed["provider"], "n8n")
+        self.assertEqual(res_confirmed["contact_email_source"], "posting")
 
     async def test_04_sanitize_crlf_and_parseaddr_validation(self):
         """Sanitizar final_subject quitando \\r\\n y validar destinatario con parseaddr."""
@@ -188,21 +193,25 @@ class TestPhase1Phase2Fixes(unittest.IsolatedAsyncioTestCase):
             job_id="job-crlf-1",
             to_email="not-an-email-address",
             confirmed=True,
-            channel="local",
         )
         self.assertFalse(res_bad_email["ok"])
         self.assertIn("no tiene un formato válido", res_bad_email["error"])
 
         # Intento de CRLF Injection en asunto
-        res_crlf = await self.dispatcher.dispatch_application(
-            job_id="job-crlf-1",
-            to_email="jobs@designsystem.co",
-            custom_subject="Asunto con\r\nInyección de\r\nHeaders: Bcc: attacker@evil.com",
-            custom_body="Cuerpo limpio",
-            confirmed=True,
-            channel="local",
-        )
+        self.settings.n8n_application_webhook_url = "https://n8n.example.com/webhook/apply"
+        ok_resp = MagicMock(status_code=200, text="OK")
+        with patch("httpx.AsyncClient.post", new_callable=AsyncMock, return_value=ok_resp) as mock_post:
+            res_crlf = await self.dispatcher.dispatch_application(
+                job_id="job-crlf-1",
+                to_email="rrhh@designsystem.co",
+                custom_subject="Asunto con\r\nInyección de\r\nHeaders: Bcc: attacker@evil.com",
+                custom_body="Cuerpo limpio",
+                confirmed=True,
+            )
         self.assertTrue(res_crlf["ok"])
+        sent_subject = mock_post.call_args[1]["json"]["subject"]
+        self.assertNotIn("\r", sent_subject)
+        self.assertNotIn("\n", sent_subject)
 
     async def test_05_webhook_auth_fail_closed(self):
         """Verifica que verify_webhook_auth sea fail-closed cuando no hay secret ni token."""

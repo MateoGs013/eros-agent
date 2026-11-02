@@ -47,9 +47,17 @@ class Settings(BaseSettings):
     hunter_io_api_key: str = ""
 
     # n8n Automation Webhooks
+    # n8n_webhook_url: publicación de contenido. n8n_application_webhook_url: postulaciones.
+    # Nunca se usa uno en lugar del otro. Eros manda n8n_webhook_secret en el header
+    # X-N8N-Secret de ambos; los webhooks de n8n tienen que validarlo (Header Auth).
     n8n_webhook_url: str = ""
     n8n_application_webhook_url: str = ""
     n8n_webhook_secret: str = ""
+
+    # URL pública de Eros (enlaces del carousel y del CV en los correos)
+    public_base_url: str = "https://eros.mateogs.tech"
+    # Secreto para firmar los enlaces públicos del CV (si está vacío se deriva de EROS_API_KEY)
+    cv_link_secret: str = ""
 
     # SMTP / Direct Email Settings (Opcional si se usa SMTP directo en vez de n8n)
     smtp_host: str = ""
