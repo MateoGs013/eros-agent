@@ -149,7 +149,7 @@ class TestJobApplicationDispatcher(unittest.IsolatedAsyncioTestCase):
             mock_http.return_value = mock_resp
             result = await self.dispatcher.dispatch_application(
                 job_id="job-email-3",
-                to_email="jobs@initech.com",
+                to_email="rrhh@initech.com",
                 custom_subject="Postulacion a Python Developer",
                 custom_body="Presento mi candidatura para la vacante de Python Developer.",
                 channel="n8n"
@@ -157,10 +157,14 @@ class TestJobApplicationDispatcher(unittest.IsolatedAsyncioTestCase):
 
             self.assertTrue(result["ok"])
             self.assertEqual(result["provider"], "n8n")
+            self.assertEqual(result["contact_email_source"], "manual")
             mock_http.assert_called_once()
+            self.assertEqual(mock_http.call_args[0][0], "https://n8n.example.com/webhook/test-app")
+            self.assertEqual(mock_http.call_args[1]["headers"]["Idempotency-Key"], "apply-job-email-3")
             called_payload = mock_http.call_args[1]["json"]
+            self.assertEqual(called_payload["idempotency_key"], "apply-job-email-3")
             self.assertEqual(called_payload["event"], "job.application")
-            self.assertEqual(called_payload["recipient_email"], "jobs@initech.com")
+            self.assertEqual(called_payload["recipient_email"], "rrhh@initech.com")
             self.assertEqual(called_payload["cv_filename"], "CV_Mateo_Sonzogni.pdf")
             self.assertIn("cv_pdf_base64", called_payload)
             self.assertTrue(len(called_payload["cv_pdf_base64"]) > 0)
@@ -172,7 +176,7 @@ class TestJobApplicationDispatcher(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(applied_job.status.value, "applied")
         self.assertIsNotNone(applied_job.applied_at)
 
-    async def test_05_dispatch_local_mode(self):
+    async def test_05_dispatch_without_provider_is_not_applied(self):
         job = JobOffer(
             id="job-email-4",
             source="workana",
@@ -184,6 +188,7 @@ class TestJobApplicationDispatcher(unittest.IsolatedAsyncioTestCase):
         )
         await self.storage.save_job(job)
 
+        # Canal inexistente
         result = await self.dispatcher.dispatch_application(
             job_id="job-email-4",
             to_email="apply@creativelab.io",
@@ -191,12 +196,31 @@ class TestJobApplicationDispatcher(unittest.IsolatedAsyncioTestCase):
             custom_body="Estimado equipo...",
             channel="local"
         )
-        self.assertTrue(result["ok"])
-        self.assertEqual(result["provider"], "local_registered")
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["error_code"], "invalid_channel")
+
+        # Sin proveedor configurado: no se envía, no se registra, no hay POST a una URL vacía
+        self.dispatcher.settings.n8n_application_webhook_url = ""
+        self.dispatcher.settings.n8n_webhook_url = "https://n8n.example.com/webhook/eros-content"
+        self.dispatcher.settings.smtp_host = ""
+        with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_http:
+            for channel in ("auto", "n8n", "smtp"):
+                result = await self.dispatcher.dispatch_application(
+                    job_id="job-email-4",
+                    to_email="talento@creativelab.io",
+                    custom_subject="Postulacion Nuxt Engineer",
+                    custom_body="Estimado equipo...",
+                    channel=channel,
+                )
+                self.assertFalse(result["ok"])
+                self.assertEqual(result["error_code"], "no_provider")
+            # Nunca cae al webhook de contenido
+            mock_http.assert_not_called()
 
         saved = await self.storage.get_job("job-email-4")
-        self.assertEqual(saved.status.value, "applied")
-        self.assertIsNotNone(saved.applied_at)
+        self.assertEqual(saved.status.value, "new")
+        self.assertIsNone(saved.applied_at)
+        self.assertIsNone(saved.send_state)
 
     async def test_06_dispatch_via_smtp_attaches_pdf(self):
         """Verifica que el despacho SMTP directo adjunte CV_Mateo_Sonzogni.pdf con bytes %PDF."""
@@ -237,6 +261,7 @@ class TestJobApplicationDispatcher(unittest.IsolatedAsyncioTestCase):
             def sendmail(self, from_addr, to_addrs, msg_str):
                 sent_messages.append((from_addr, to_addrs, msg_str))
 
+        await self.storage.update_job_contact_email("job-email-smtp", "hiring@globex.com", source="posting")
         with patch("smtplib.SMTP", side_effect=MockSMTP):
             res = await self.dispatcher.dispatch_application(
                 job_id="job-email-smtp",
@@ -317,16 +342,42 @@ class TestJobApplicationDispatcher(unittest.IsolatedAsyncioTestCase):
         )
         await engine.storage.save_job(job)
 
+        import os
+        from eros.config import get_settings
+        from eros.security import sign_cv_token
+        os.environ["EROS_API_KEY"] = "eros_cv_test_key_123456"
+        get_settings.cache_clear()
+
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            # Público sin token: 401. Con la clave pero sin CV guardado: 404 (no se genera en un GET).
             resp = await client.get("/api/cv/job-pdf-api-test/pdf")
+            self.assertEqual(resp.status_code, 401)
+            gen_mock = AsyncMock()
+            with patch.object(engine.cv_gen, "generate_tailored_cv", gen_mock):
+                resp = await client.get(
+                    "/api/cv/job-pdf-api-test/pdf", headers={"Authorization": "Bearer eros_cv_test_key_123456"}
+                )
+            self.assertEqual(resp.status_code, 404)
+            gen_mock.assert_not_called()
+
+            # Con un CV guardado y el token firmado de esa vacante: 200
+            cv = engine.cv_gen._build_fallback_cv(self.sample_profile, job)
+            job.tailored_cv = cv.model_dump_json()
+            await engine.storage.save_job(job)
+            token = sign_cv_token("job-pdf-api-test")
+            resp = await client.get("/api/cv/job-pdf-api-test/pdf?token=bad")
+            self.assertEqual(resp.status_code, 401)
+            resp = await client.get(f"/api/cv/job-pdf-api-test/pdf?token={sign_cv_token('otra-vacante')}")
+            self.assertEqual(resp.status_code, 401)
+            resp = await client.get(f"/api/cv/job-pdf-api-test/pdf?token={token}")
             self.assertEqual(resp.status_code, 200)
             self.assertEqual(resp.headers["content-type"], "application/pdf")
             self.assertIn("CV_Mateo_Sonzogni.pdf", resp.headers["content-disposition"])
             self.assertTrue(resp.content.startswith(b"%PDF"))
 
             # Alias /api/jobs/{id}/cv/pdf
-            resp_alias = await client.get("/api/jobs/job-pdf-api-test/cv/pdf")
+            resp_alias = await client.get(f"/api/jobs/job-pdf-api-test/cv/pdf?token={token}")
             self.assertEqual(resp_alias.status_code, 200)
             self.assertEqual(resp_alias.headers["content-type"], "application/pdf")
             self.assertTrue(resp_alias.content.startswith(b"%PDF"))

@@ -5,6 +5,7 @@ import sys
 from eros.bot.telegram import TelegramBot
 from eros.config import get_settings
 from eros.hunter.engine import HunterEngine
+from eros.logging_setup import configure_logging
 
 # Asegurar encoding UTF-8 en terminales Windows
 if sys.platform == "win32":
@@ -14,10 +15,7 @@ if sys.platform == "win32":
     except Exception:
         pass
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
-)
+configure_logging()
 logger = logging.getLogger("eros")
 
 

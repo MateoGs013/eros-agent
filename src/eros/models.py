@@ -45,8 +45,14 @@ class JobOffer(BaseModel):
 
     # Despacho Automatizado de Postulaciones (Email / ATS)
     contact_email: str | None = None
+    # De dónde salió contact_email: posting | company_site | hunter | manual | unknown
+    contact_email_source: str | None = None
     applied_at: str | None = None
     scored_by: str | None = None
+
+    # Envío en curso: None | "sending" | "unknown" (se cortó sin saber si salió)
+    send_state: str | None = None
+    send_started_at: str | None = None
 
 
 class CVProject(BaseModel):

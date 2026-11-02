@@ -16,7 +16,7 @@ from eros.content.models import (
 )
 from eros.content.storage import ContentStorage
 from eros.hunter.engine import HunterEngine
-from eros.integrations.llm import LLMClient
+from eros.integrations.llm import LLMClient, LLMOutputError
 from eros.models import ProfileContext, ProjectSummary
 
 logger = logging.getLogger(__name__)
@@ -27,12 +27,13 @@ SYSTEM_PROMPT = """Eres el Agente Estratega de Contenido y Marca Técnica de Mat
 Tu objetivo es redactar contenido técnico omnicanal de altísimo valor ("high-signal engineering content") para LinkedIn, Twitter/X y Dev.to, junto a un guion de 5 diapositivas para un carousel visual.
 
 Reglas inquebrantables de estilo y tono:
-1. TONO: Ingenieril, honesto, empírico y directo. CERO frases motivacionales vacías de autoayuda ("persigue tus sueños", "nunca te rindas"). HABLA DE CÓDIGO, ARQUITECTURA, TRADE-OFFS Y MÉTRICAS REALES.
+1. TONO: Ingenieril, honesto, empírico y directo. CERO frases motivacionales vacías de autoayuda ("persigue tus sueños", "nunca te rindas"). HABLA DE CÓDIGO, ARQUITECTURA Y TRADE-OFFS.
+   MÉTRICAS: usá solo números que aparezcan en los datos que te paso (resultados del proyecto o instrucciones del autor). NUNCA inventes porcentajes, latencias, puntajes de Lighthouse ni benchmarks: si no hay un dato real, describí el cambio sin número y dejá "metric_badge" en null.
 2. EVIDENCIA REAL: Conecta las lecciones con los proyectos reales de Mateo (Portafolio mateogs.tech, La Rúcula, Ynara, ARG Piscinas, null-net, lampone, Eros Agent).
 3. FORMATO LINKEDIN:
    - REGLA ESTRICTA: CERO EMOJIS. No uses emojis bajo ninguna circunstancia. Usa viñetas de texto limpias ("•", "→", "-") o numeradas.
-   - Gancho (Hook): Primeras 2 líneas directas, contrastantes o con métricas antes de que el usuario haga clic en "ver más".
-   - Cuerpo: Problema real -> Hipótesis fallida o trade-off -> Arquitectura/Código implementado (bullet points con viñetas limpias: • o →) -> Métrica/Resultado medible.
+   - Gancho (Hook): Primeras 2 líneas directas y contrastantes antes de que el usuario haga clic en "ver más".
+   - Cuerpo: Problema real -> Hipótesis fallida o trade-off -> Arquitectura/Código implementado (bullet points con viñetas limpias: • o →) -> Resultado (con número solo si es un dato real provisto).
    - Cierre y Pregunta de Debate: Invita a otros TLs y desarrolladores a opinar sobre el enfoque.
    - 3 a 5 hashtags específicos del ecosistema (#webdev #frontend #typescript #softwarearchitecture #vuejs).
    - Primer Comentario: Un comentario complementario con el enlace de producción o repositorio (ej: "Pueden ver la arquitectura en vivo y el panel en: https://mateogs.tech").
@@ -48,7 +49,7 @@ Reglas inquebrantables de estilo y tono:
    - Slide 1 (Portada): Título contundente, subtítulo intrigante, autor y badge destacado.
    - Slide 2 (El Cuello de Botella / Problema): Qué fallaba o qué limitación existía en el diseño previo.
    - Slide 3 (La Solución Arquitectónica): Código o patrón técnico aplicado.
-   - Slide 4 (Métricas y Benchmarks): Comparativa (antes vs después, latencia, bundle size, Lighthouse).
+   - Slide 4 (Resultados): Qué cambió. Números solo si vienen en los datos provistos; si no, resultados cualitativos.
    - Slide 5 (Conclusión y CTA): Resumen accionable en 3 pasos + enlace a https://mateogs.tech.
 
 RESPONDE EXCLUSIVAMENTE CON UN OBJETO JSON VÁLIDO según el esquema solicitado."""
@@ -79,9 +80,16 @@ class ContentGenerator:
             else "Optimización de rendimiento y arquitectura frontend moderna"
         )
 
-        user_prompt = self._build_prompt(topic, pillar, selected_project, profile, request.custom_instructions)
+        instructions = request.custom_instructions
+        points = [p.strip() for p in request.key_points if p and p.strip()]
+        if points:
+            points_block = "Puntos clave a cubrir:\n" + "\n".join(f"- {p}" for p in points)
+            instructions = f"{instructions}\n\n{points_block}" if instructions else points_block
+
+        user_prompt = self._build_prompt(topic, pillar, selected_project, profile, instructions)
 
         logger.info(f"Generando contenido omnicanal para tema: '{topic}' (Pilar: {pillar.value})...")
+        # Sin IA lanza LLMUnavailableError: no hay post armado de reemplazo.
         raw_response = await self.llm.generate(
             prompt=user_prompt,
             system_prompt=SYSTEM_PROMPT,
@@ -154,7 +162,7 @@ Genera un JSON con esta estructura exacta:
       "title": "Título Slide 1",
       "subtitle": "Subtítulo intrigante",
       "bullets": ["Punto 1", "Punto 2"],
-      "metric_badge": "Ej: 99/100 Lighthouse",
+      "metric_badge": null,
       "code_snippet": null,
       "footer": "Mateo Sonzogni · mateogs.tech"
     }},
@@ -181,7 +189,7 @@ Genera un JSON con esta estructura exacta:
       "title": "Título Slide 4 (Métricas)",
       "subtitle": "Resultados comprobables",
       "bullets": ["Punto 1", "Punto 2"],
-      "metric_badge": "Ej: -65% Latencia",
+      "metric_badge": "Solo un número real provisto, o null",
       "code_snippet": null,
       "footer": "Impacto en producción"
     }},
@@ -205,7 +213,7 @@ Genera un JSON con esta estructura exacta:
         pillar: ContentPillar,
         project_slug: str | None
     ) -> ContentPost:
-        """Parsea la respuesta JSON del LLM de forma resiliente."""
+        """Parsea la respuesta JSON del LLM. Si no es usable, lanza LLMOutputError (no hay post de relleno)."""
         cleaned = raw_text.strip()
         if cleaned.startswith("```json"):
             cleaned = cleaned[7:]
@@ -217,25 +225,11 @@ Genera un JSON con esta estructura exacta:
 
         try:
             data = json.loads(cleaned)
+            if not isinstance(data, dict) or not (data.get("linkedin_post") or data.get("hook")):
+                raise ValueError("faltan linkedin_post y hook")
         except Exception as e:
-            logger.error(f"Error parseando JSON de Gemini ({e}): {raw_text[:200]}")
-            # Fallback seguro
-            data = {
-                "title": f"Lecciones de Ingeniería: {topic}",
-                "hook": f"En producción, la teoría se choca con la realidad. Así abordamos {topic}.",
-                "linkedin_post": f"{topic}\n\nEn producción las cosas cambian. Aquí los aprendizajes y decisiones clave.\n\n#webdev #architecture",
-                "first_comment": "Podés ver más detalles técnicos en https://mateogs.tech",
-                "twitter_thread": [f"1/2 Lecciones de producción sobre {topic}...", "2/2 Fin del hilo. Más en mateogs.tech"],
-                "devto_article": {
-                    "title": f"Cómo abordamos {topic}",
-                    "tags": ["webdev", "architecture", "javascript", "vue"],
-                    "markdown_body": f"# {topic}\n\nDetalles de arquitectura e implementación."
-                },
-                "carousel_slides": [
-                    {"index": i, "title": f"Punto {i}", "subtitle": "Explicación", "bullets": ["Detalle"], "metric_badge": None, "code_snippet": None, "footer": "mateogs.tech"}
-                    for i in range(1, 6)
-                ]
-            }
+            logger.error(f"Respuesta de IA inutilizable para el post ({e}): {raw_text[:200]}")
+            raise LLMOutputError(f"La IA devolvió un post inválido: {e}") from e
 
         post_id = f"post_{datetime.now().strftime('%Y%m%d%H%M')}_{uuid.uuid4().hex[:6]}"
         now_iso = datetime.now(timezone.utc).isoformat()

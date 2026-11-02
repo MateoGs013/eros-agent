@@ -31,6 +31,7 @@ class RadarEngine:
         self.hn_source = HackerNewsSource()
         self.devto_source = DevToSource()
         self.github_source = GitHubTrendingSource()
+        self.last_new_count = 0
 
     def calculate_relevance(self, title: str, summary: str, tags: list[str]) -> tuple[int, list[str]]:
         corpus = f"{title.lower()} {summary.lower()} {' '.join(tags).lower()}"
@@ -70,7 +71,11 @@ class RadarEngine:
         return f"Desglose crítico desde la perspectiva de desarrollo Full Stack: implicaciones prácticas, costos operativos y aplicabilidad en proyectos de ingeniería de software."
 
     async def scan(self, limit_per_source: int = 15) -> list[TrendItem]:
-        """Escanea todas las fuentes en paralelo, evalúa relevancia y persiste novedades."""
+        """Escanea todas las fuentes en paralelo, evalúa relevancia y persiste novedades.
+
+        Devuelve las tendencias con su estado guardado (las ya GENERATED siguen GENERATED).
+        `self.last_new_count` queda con cuántas eran nuevas.
+        """
         await self.storage.init_db()
 
         hn_task = self.hn_source.fetch(limit=limit_per_source)
@@ -86,6 +91,7 @@ class RadarEngine:
 
         now_iso = datetime.now(timezone.utc).isoformat()
         discovered_trends: list[TrendItem] = []
+        self.last_new_count = 0
 
         for item in all_raw_items:
             title = item.get("title", "").strip()
@@ -116,8 +122,11 @@ class RadarEngine:
                 status=TrendStatus.DISCOVERED,
             )
 
-            await self.storage.save_trend(trend)
-            discovered_trends.append(trend)
+            if await self.storage.save_trend(trend):
+                self.last_new_count += 1
+                discovered_trends.append(trend)
+            else:
+                discovered_trends.append(await self.storage.get_trend(trend.id) or trend)
 
         discovered_trends.sort(key=lambda t: t.relevance_score, reverse=True)
         return discovered_trends

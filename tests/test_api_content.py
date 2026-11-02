@@ -117,10 +117,21 @@ class TestApiContentEndpoints(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(res_patch.status_code, 200)
             self.assertEqual(res_patch.json()["new_status"], "rejected")
 
-            # Publicar (modo local sin webhook n8n configurado)
+            # Una publicación rechazada no se publica
+            with patch.object(content_dispatcher.settings, "n8n_webhook_url", ""):
+                res_rejected = await client.post(
+                    "/api/content/posts/post_test_api_1/publish",
+                    headers=headers,
+                )
+                self.assertEqual(res_rejected.status_code, 409)
+                self.assertEqual(res_rejected.json()["error_code"], "rejected")
+
+            # Vuelta a borrador: se aprueba en modo local (sin webhook n8n configurado)
+            await client.patch("/api/content/posts/post_test_api_1/status", json={"status": "draft"}, headers=headers)
             with patch.object(content_dispatcher.settings, "n8n_webhook_url", ""):
                 res_pub = await client.post(
                     "/api/content/posts/post_test_api_1/publish",
+                    json={"channel": "linkedin"},
                     headers=headers,
                 )
                 self.assertEqual(res_pub.status_code, 200)

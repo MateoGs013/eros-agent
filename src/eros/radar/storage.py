@@ -43,7 +43,11 @@ class RadarStorage:
             await db.commit()
 
     async def save_trend(self, trend: TrendItem) -> bool:
-        """Inserta o actualiza una tendencia."""
+        """Inserta una tendencia o refresca sus datos. Devuelve True si es nueva.
+
+        Al refrescar no toca status ni post_id: una tendencia GENERATED o DISCARDED
+        no vuelve a DISCOVERED por re-escanear.
+        """
         async with aiosqlite.connect(self.db_path) as db:
             async with db.execute("SELECT id FROM trends WHERE id = ?", (trend.id,)) as cursor:
                 exists = await cursor.fetchone() is not None
@@ -68,15 +72,15 @@ class RadarStorage:
                     UPDATE trends SET
                         title = ?, url = ?, source = ?, summary = ?,
                         relevance_score = ?, engineering_angle = ?, tags = ?,
-                        status = ?, post_id = ?, updated_at = ?
+                        updated_at = ?
                     WHERE id = ?
                 """, (
                     trend.title, trend.url, trend.source.value, trend.summary,
                     trend.relevance_score, trend.engineering_angle, tags_json,
-                    trend.status.value, trend.post_id, now_iso, trend.id
+                    now_iso, trend.id
                 ))
             await db.commit()
-            return True
+            return not exists
 
     async def get_trends(
         self,

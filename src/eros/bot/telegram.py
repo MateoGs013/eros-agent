@@ -5,7 +5,8 @@ import logging
 from typing import Any
 import httpx
 from eros.config import get_settings
-from eros.hunter.engine import HunterEngine
+from eros.hunter.engine import HunterEngine, ScanInProgressError
+from eros.integrations.llm import LLMOutputError, LLMUnavailableError
 from eros.models import JobOffer, JobStatus, MatchResult
 from eros.content.models import (
     ContentGenerateRequest,
@@ -222,7 +223,7 @@ class TelegramBot:
 
             try:
                 post = await self.content_generator.generate_post(ContentGenerateRequest(topic=topic))
-                carousel_url = f"https://eros.mateogs.tech/api/content/carousel/{post.id}/html"
+                carousel_url = f"{self.settings.public_base_url.rstrip('/')}/api/content/carousel/{post.id}/html"
 
                 summary = (
                     f"<b>[NUEVO POST GENERADO] (Borrador)</b>\n\n"
@@ -257,7 +258,7 @@ class TelegramBot:
 
             await self.send_message(chat_id, f"<b>Top {len(drafts)} publicaciones en borrador pendientes:</b>")
             for post in drafts:
-                carousel_url = f"https://eros.mateogs.tech/api/content/carousel/{post.id}/html"
+                carousel_url = f"{self.settings.public_base_url.rstrip('/')}/api/content/carousel/{post.id}/html"
                 buttons = [
                     [
                         {"text": "Aprobar n8n", "callback_data": f"pub_post:{post.id}"},
@@ -308,8 +309,12 @@ class TelegramBot:
 
         elif cmd == "/buscar":
             await self.send_message(chat_id, "<i>[BUSCANDO] Consultando Get on Board, RemoteOK y Hacker News...</i>")
-            scan_res = await self.engine.run_scan()
-            eval_res = await self.engine.evaluate_pending_jobs(limit=10)
+            try:
+                scan_res = await self.engine.run_scan()
+                eval_res = await self.engine.evaluate_pending_jobs(limit=10)
+            except ScanInProgressError as e:
+                await self.send_message(chat_id, f"<b>[OCUPADO]</b> {html.escape(str(e))} Probá en unos minutos.")
+                return
 
             high_matches = [m for m in eval_res if m[1].score >= self.settings.match_min_score]
             msg = (
@@ -369,7 +374,10 @@ class TelegramBot:
             await self.send_message(chat_id, f"<i>[DESPACHO] Aprobando y enviando post {post_id} a n8n...</i>")
             res = await self.content_dispatcher.publish_post(post_id)
             if res.get("ok"):
-                status_note = "Enviado a n8n para distribución automática." if res.get("status") == "published" else res.get("message")
+                status_note = (
+                    "Enviado a n8n; queda publicado cuando n8n lo confirme."
+                    if res.get("status") == "dispatched" else res.get("message")
+                )
                 await self.send_message(chat_id, f"<b>[APROBADO] Publicación procesada con éxito:</b>\n{status_note}")
             else:
                 await self.send_message(chat_id, f"<b>[ERROR] Falla en despacho:</b> {html.escape(str(res.get('error')))}")
@@ -382,7 +390,11 @@ class TelegramBot:
         elif data.startswith("pitch:"):
             job_id = data.split("pitch:")[1]
             await self.send_message(chat_id, "<i>[PITCH] Redactando propuesta con tus proyectos y métricas...</i>")
-            pitch = await self.engine.generate_pitch_for_job(job_id)
+            try:
+                pitch = await self.engine.generate_pitch_for_job(job_id)
+            except (LLMUnavailableError, LLMOutputError) as e:
+                await self.send_message(chat_id, f"<b>[SIN IA]</b> No se redactó el pitch: {html.escape(str(e))}")
+                return
             if not pitch:
                 await self.send_message(chat_id, "No se pudo recuperar la oferta para redactar el pitch.")
                 return

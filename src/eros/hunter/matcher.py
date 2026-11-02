@@ -108,24 +108,30 @@ Devolve exclusivamente el JSON de evaluación.
 """
 
         try:
-            raw_response = await self.llm.generate(prompt, system_prompt=SYSTEM_PROMPT, prefer_model="gemini", json_mode=True)
+            raw_response = await self.llm.generate(
+                prompt, system_prompt=SYSTEM_PROMPT, prefer_model="gemini", json_mode=True, allow_heuristic=True
+            )
             clean_json = raw_response.strip()
             json_match = re.search(r"\{.*\}", clean_json, re.DOTALL)
             if json_match:
                 clean_json = json_match.group(0)
 
             data = json.loads(clean_json)
+            scored_by = data.get("scored_by", "gemini")
 
             recruiter_note = data.get("recruiter_note")
             hiring_name = data.get("hiring_manager_name") or job.hiring_manager_name
             hiring_title = data.get("hiring_manager_title") or job.hiring_manager_title
             hiring_url = job.hiring_manager_url
 
-            if not recruiter_note or not recruiter_note.strip():
+            # La estimación heurística no redacta mensajes: sin IA no hay nota de conexión.
+            if scored_by == "heuristic":
+                recruiter_note = None
+            elif not recruiter_note or not recruiter_note.strip():
                 greeting = f"Hola {hiring_name.split()[0]}, " if hiring_name else "Hola, "
                 recruiter_note = f"{greeting}vi la búsqueda de {job.title} en {job.company}. Me especializo en Vue/Nuxt, Node y TypeScript. Portafolio: mateogs.tech. Me gustaría conectar!"
 
-            if len(recruiter_note) > 280:
+            if recruiter_note and len(recruiter_note) > 280:
                 recruiter_note = recruiter_note[:277] + "..."
 
             return MatchResult(
@@ -141,15 +147,12 @@ Devolve exclusivamente el JSON de evaluación.
                 hiring_manager_name=hiring_name,
                 hiring_manager_title=hiring_title,
                 hiring_manager_url=hiring_url,
-                scored_by=data.get("scored_by", "gemini"),
+                scored_by=scored_by,
             )
         except Exception as e:
-            logger.error(f"Error evaluando oferta '{job.title}': {e}. Usando fallback heurístico.")
+            logger.error(f"Error evaluando oferta '{job.title}': {e}. Usando estimación heurística.")
             hiring_name = job.hiring_manager_name
-            greeting = f"Hola {hiring_name.split()[0]}, " if hiring_name else "Hola, "
-            fallback_note = f"{greeting}vi la búsqueda de {job.title} en {job.company}. Me especializo en Vue/Nuxt, Node y TypeScript. Portafolio: mateogs.tech. Me gustaría conectar!"
-            if len(fallback_note) > 280:
-                fallback_note = fallback_note[:277] + "..."
+            fallback_note = None
 
             try:
                 fallback_json = LLMClient()._heuristic_evaluate_job(prompt)
@@ -172,13 +175,13 @@ Devolve exclusivamente el JSON de evaluación.
             except Exception as fb_err:
                 logger.error(f"Falla crítica en fallback: {fb_err}")
                 return MatchResult(
-                    score=70,
-                    verdict="BUEN_MATCH",
-                    summary=f"Evaluación de la vacante {job.title} en {job.company}. Perfil compatible con arquitectura Full Stack y desarrollo en producción.",
-                    pros=["Alineación con stack Full Stack", "Modalidad compatible"],
-                    cons=["Validar requisitos específicos"],
+                    score=50,
+                    verdict="REGULAR",
+                    summary="Sin evaluación: la IA no respondió y la estimación heurística falló. Revisá la vacante a mano.",
+                    pros=[],
+                    cons=["Sin evaluación automática"],
                     missing_skills=[],
-                    matching_projects=["Portafolio (mateogs.tech)", "Ynara"],
+                    matching_projects=[],
                     salary_estimate=job.salary,
                     recruiter_note=fallback_note,
                     hiring_manager_name=hiring_name,

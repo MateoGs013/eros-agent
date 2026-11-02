@@ -48,6 +48,11 @@ class ContentStorage:
                     updated_at TEXT NOT NULL
                 )
             """)
+            for col in ("dispatched_channels TEXT", "dispatched_at TEXT", "published_channels TEXT"):
+                try:
+                    await db.execute(f"ALTER TABLE content_posts ADD COLUMN {col}")
+                except Exception:
+                    pass
             await db.execute("CREATE INDEX IF NOT EXISTS idx_content_status ON content_posts(status)")
             await db.execute("CREATE INDEX IF NOT EXISTS idx_content_created ON content_posts(created_at)")
             await db.commit()
@@ -150,6 +155,115 @@ class ContentStorage:
             await db.commit()
             return True
 
+    async def claim_dispatch(self, post_id: str, channels: list[str], force: bool = False) -> tuple[str, list[str]]:
+        """Reserva de forma atómica los canales a despachar de una publicación.
+
+        Devuelve ("claimed", canales despachados) o un motivo de rechazo: ("missing", []),
+        ("rejected", []), ("published", canales ya publicados) o
+        ("already_dispatched", canales despachados esperando confirmación).
+        Una publicación ya publicada en un canal puede despacharse a otro canal.
+        """
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("BEGIN IMMEDIATE")
+            async with db.execute(
+                "SELECT status, dispatched_channels, published_channels FROM content_posts WHERE id = ?", (post_id,)
+            ) as cursor:
+                row = await cursor.fetchone()
+            if not row:
+                await db.rollback()
+                return "missing", []
+            status, raw_dispatched, raw_published = row
+            if status == ContentPostStatus.REJECTED.value:
+                await db.rollback()
+                return "rejected", []
+            published = self._load_channels(raw_published)
+            if any(c in published for c in channels):
+                await db.rollback()
+                return "published", published
+            already = self._load_channels(raw_dispatched)
+            if any(c in already for c in channels) and not force:
+                await db.rollback()
+                return "already_dispatched", already
+            merged = sorted(set(already) | set(channels))
+            new_status = status if status == ContentPostStatus.PUBLISHED.value else ContentPostStatus.APPROVED.value
+            now_iso = datetime.now(timezone.utc).isoformat()
+            await db.execute("""
+                UPDATE content_posts SET status = ?, dispatched_channels = ?, dispatched_at = ?, updated_at = ?
+                WHERE id = ?
+            """, (new_status, json.dumps(merged), now_iso, now_iso, post_id))
+            await db.commit()
+            return "claimed", merged
+
+    async def release_dispatch(self, post_id: str, channels: list[str], n8n_response: str | None = None) -> None:
+        """Libera canales despachados que n8n no publicó (los ya publicados no se tocan)."""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("BEGIN IMMEDIATE")
+            async with db.execute(
+                "SELECT dispatched_channels, published_channels FROM content_posts WHERE id = ?", (post_id,)
+            ) as cursor:
+                row = await cursor.fetchone()
+            if not row:
+                await db.rollback()
+                return
+            published = self._load_channels(row[1])
+            remaining = [c for c in self._load_channels(row[0]) if c not in channels or c in published]
+            now_iso = datetime.now(timezone.utc).isoformat()
+            await db.execute("""
+                UPDATE content_posts SET dispatched_channels = ?,
+                    dispatched_at = CASE WHEN ? = '[]' THEN NULL ELSE dispatched_at END,
+                    n8n_response = COALESCE(?, n8n_response), updated_at = ?
+                WHERE id = ?
+            """, (json.dumps(remaining), json.dumps(remaining), n8n_response, now_iso, post_id))
+            await db.commit()
+
+    async def confirm_published(self, post_id: str, channels: list[str] | None, n8n_response: str | None = None) -> ContentPostStatus | None:
+        """Registra la confirmación de n8n para uno o más canales.
+
+        La publicación pasa a PUBLISHED cuando todos los canales despachados están confirmados.
+        channels=None confirma todos los despachados. Devuelve el estado resultante.
+        """
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("BEGIN IMMEDIATE")
+            async with db.execute(
+                "SELECT status, dispatched_channels, published_channels FROM content_posts WHERE id = ?", (post_id,)
+            ) as cursor:
+                row = await cursor.fetchone()
+            if not row:
+                await db.rollback()
+                return None
+            status, raw_dispatched, raw_published = row
+            dispatched = self._load_channels(raw_dispatched)
+            confirmed = dispatched if channels is None else channels
+            published = sorted(set(self._load_channels(raw_published)) | set(confirmed))
+            # Sin canales despachados registrados (p. ej. despachada antes de este cambio), confirma igual
+            all_done = set(dispatched) <= set(published)
+            new_status = ContentPostStatus.PUBLISHED.value if all_done else status
+            now_iso = datetime.now(timezone.utc).isoformat()
+            await db.execute("""
+                UPDATE content_posts SET status = ?, published_channels = ?,
+                    n8n_published_at = CASE WHEN ? = 'published' THEN COALESCE(n8n_published_at, ?) ELSE n8n_published_at END,
+                    n8n_response = COALESCE(?, n8n_response), updated_at = ?
+                WHERE id = ?
+            """, (new_status, json.dumps(published), new_status, now_iso, n8n_response, now_iso, post_id))
+            await db.commit()
+            return ContentPostStatus(new_status)
+
+    async def set_n8n_response(self, post_id: str, n8n_response: str) -> None:
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                "UPDATE content_posts SET n8n_response = ?, updated_at = ? WHERE id = ?",
+                (n8n_response, datetime.now(timezone.utc).isoformat(), post_id),
+            )
+            await db.commit()
+
+    @staticmethod
+    def _load_channels(raw: str | None) -> list[str]:
+        try:
+            value = json.loads(raw) if raw else []
+            return [str(c) for c in value] if isinstance(value, list) else []
+        except Exception:
+            return []
+
     async def delete_post(self, post_id: str) -> bool:
         """Elimina una publicación."""
         async with aiosqlite.connect(self.db_path) as db:
@@ -196,6 +310,9 @@ class ContentStorage:
             status=ContentPostStatus(row["status"]),
             n8n_published_at=row["n8n_published_at"],
             n8n_response=row["n8n_response"],
+            dispatched_channels=self._load_channels(row["dispatched_channels"]) if "dispatched_channels" in row.keys() else [],
+            dispatched_at=row["dispatched_at"] if "dispatched_at" in row.keys() else None,
+            published_channels=self._load_channels(row["published_channels"]) if "published_channels" in row.keys() else [],
             created_at=row["created_at"],
             updated_at=row["updated_at"],
         )

@@ -1,6 +1,7 @@
 from enum import Enum
 from typing import Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+from eros.content.models import ContentPillar
 
 
 class TrendSource(str, Enum):
@@ -37,6 +38,16 @@ class TrendScanResponse(BaseModel):
 
 
 class TrendGenerateRequest(BaseModel):
-    pillar: str = "TECHNICAL_BREAKDOWN"
+    pillar: ContentPillar = ContentPillar.ARCHITECTURE
     project_slug: str | None = None
     custom_angle: str | None = None
+    key_points: list[str] = Field(default_factory=list)
+    custom_instructions: str | None = None
+
+    @field_validator("pillar", mode="before")
+    @classmethod
+    def default_pillar(cls, v: Any) -> Any:
+        # null o vacío → enfoque por defecto; acepta mayúsculas ("ARCHITECTURE")
+        if v is None or (isinstance(v, str) and not v.strip()):
+            return ContentPillar.ARCHITECTURE
+        return v.strip().lower() if isinstance(v, str) else v

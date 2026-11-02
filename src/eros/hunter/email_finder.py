@@ -1,9 +1,7 @@
 """Módulo de resolución automática de correos de selección laboral."""
 
-import asyncio
 import logging
 import re
-import socket
 import unicodedata
 import urllib.parse
 from typing import Any
@@ -12,6 +10,7 @@ import httpx
 
 from eros.config import Settings, get_settings
 from eros.hunter.filters import extract_contact_email
+from eros.hunter.normalize import is_placeholder_company
 
 logger = logging.getLogger(__name__)
 
@@ -93,6 +92,24 @@ HR_DEPARTMENTS = (
     "people",
 )
 
+# Fuentes válidas de un correo de contacto (columna jobs.contact_email_source).
+# Nunca hay una fuente "adivinada": un correo que no salió de un lugar real no se guarda.
+EMAIL_SOURCE_POSTING = "posting"          # Publicado en el aviso
+EMAIL_SOURCE_COMPANY_SITE = "company_site"  # Publicado en el sitio de la empresa
+EMAIL_SOURCE_HUNTER = "hunter"            # Encontrado por Hunter.io (con su puntaje de confianza)
+EMAIL_SOURCE_MANUAL = "manual"            # Escrito a mano por Mateo
+EMAIL_SOURCE_UNKNOWN = "unknown"          # Correo heredado de antes de registrar la fuente
+EMAIL_SOURCES = (
+    EMAIL_SOURCE_POSTING,
+    EMAIL_SOURCE_COMPANY_SITE,
+    EMAIL_SOURCE_HUNTER,
+    EMAIL_SOURCE_MANUAL,
+    EMAIL_SOURCE_UNKNOWN,
+)
+# Fuentes donde la dirección fue publicada o escrita por una persona (no inferida).
+VERIFIED_EMAIL_SOURCES = (EMAIL_SOURCE_POSTING, EMAIL_SOURCE_COMPANY_SITE, EMAIL_SOURCE_MANUAL)
+
+
 
 class EmailFinder:
     """Servicio de resolución automática en cascada de correos corporativos para selección."""
@@ -143,8 +160,18 @@ class EmailFinder:
         except Exception:
             return None
 
-    def infer_domain_from_company(self, company: str) -> str | None:
-        """Infiere el dominio corporativo probable a partir del nombre de la empresa."""
+    @staticmethod
+    def is_placeholder_company(company: str | None) -> bool:
+        """True si el nombre de la empresa es un genérico ("Empresa Confidencial", "Stealth", etc.)."""
+        return is_placeholder_company(company)
+
+    def infer_domain_from_company(self, company: str, allow_placeholder: bool = False) -> str | None:
+        """Infiere el dominio corporativo probable a partir del nombre de la empresa.
+
+        Solo se usa como dominio de consulta para Hunter.io, nunca para armar un correo.
+        Devuelve None si la empresa es un genérico ("Empresa Confidencial"), salvo
+        allow_placeholder=True (solo para reconocer correos adivinados heredados).
+        """
         if not company or not company.strip():
             return None
 
@@ -167,7 +194,7 @@ class EmailFinder:
 
         # Quitar signos de puntuación y espacios
         compact = re.sub(r"[^a-z0-9]", "", cleaned)
-        if not compact:
+        if not compact or (not allow_placeholder and self.is_placeholder_company(company)):
             return None
 
         if compact in KNOWN_COMPANY_DOMAINS:
@@ -175,53 +202,29 @@ class EmailFinder:
 
         return f"{compact}.com"
 
-    def generate_candidate_emails(
-        self, domain: str, recruiter_name: str | None = None
-    ) -> list[str]:
-        """Genera candidatos de correos para postulaciones, incluyendo reclutador y alias genéricos."""
-        generic_candidates = [
-            f"jobs@{domain}",
-            f"careers@{domain}",
-            f"talent@{domain}",
-            f"hiring@{domain}",
-            f"rrhh@{domain}",
-        ]
+    async def fetch_company_site_email(self, job_url: str, domain: str) -> str | None:
+        """Busca un correo publicado en la página del aviso cuando vive en el sitio de la empresa.
 
-        recruiter_candidates: list[str] = []
-        if recruiter_name and recruiter_name.strip():
-            norm = (
-                unicodedata.normalize("NFKD", recruiter_name)
-                .encode("ASCII", "ignore")
-                .decode("utf-8")
-                .lower()
-                .strip()
-            )
-            parts = [p for p in re.split(r"[^a-z]", norm) if p]
-            if parts:
-                first = parts[0]
-                last = parts[-1] if len(parts) > 1 else ""
-                if last:
-                    recruiter_candidates.extend([
-                        f"{first}.{last}@{domain}",
-                        f"{first[0]}{last}@{domain}",
-                    ])
-                else:
-                    recruiter_candidates.append(f"{first}@{domain}")
-
-        return recruiter_candidates + generic_candidates
-
-    async def check_dns_resolution(self, domain: str) -> bool:
-        """Verifica la existencia y resolución de DNS básica del dominio."""
-        if not domain:
-            return False
+        Solo acepta direcciones del mismo dominio que la página: un correo de terceros
+        que aparezca en el sitio no es el contacto de selección de la empresa.
+        """
+        if not job_url or not domain:
+            return None
         try:
-            await asyncio.wait_for(
-                asyncio.to_thread(socket.gethostbyname, domain),
-                timeout=2.0,
-            )
-            return True
-        except Exception:
-            return False
+            async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as client:
+                resp = await client.get(job_url, headers={"User-Agent": "Mozilla/5.0 (ErosAgent)"})
+            if resp.status_code != 200:
+                return None
+            email = extract_contact_email(resp.text[:200_000])
+        except Exception as e:
+            logger.info(f"No se pudo leer el sitio de la empresa '{job_url}': {e}")
+            return None
+        if not email:
+            return None
+        email_domain = email.rsplit("@", 1)[-1].lower()
+        if email_domain == domain or email_domain.endswith("." + domain):
+            return email
+        return None
 
     async def query_hunter_io(
         self, domain: str, recruiter_name: str | None = None
@@ -312,39 +315,31 @@ class EmailFinder:
     ) -> tuple[str | None, str | None]:
         """Resuelve en cascada el correo de selección para una vacante laboral.
 
+        Solo devuelve direcciones que aparecen publicadas en algún lado o que
+        Hunter.io encontró; nunca arma una dirección a partir del dominio.
+
         Retorna:
-            (email, source) donde source puede ser:
-            - "description"
-            - "hunter_io"
-            - "domain_guessing"
-            - "mx_inference"
-            - None
+            (email, source) donde source es "posting", "company_site", "hunter" o None.
         """
-        # 1. Extracción directa de la descripción
+        # 1. Publicado en el aviso
         if description:
             direct_email = extract_contact_email(description)
             if direct_email:
-                return direct_email, "description"
+                return direct_email, EMAIL_SOURCE_POSTING
 
-        # 2. Deducción de dominio
-        domain = self.extract_domain_from_url(job_url)
-        if not domain and company:
-            domain = self.infer_domain_from_company(company)
+        # 2. Publicado en el sitio de la empresa (solo si el aviso vive en su dominio)
+        site_domain = self.extract_domain_from_url(job_url)
+        if site_domain:
+            site_email = await self.fetch_company_site_email(job_url, site_domain)
+            if site_email:
+                return site_email, EMAIL_SOURCE_COMPANY_SITE
 
-        if not domain:
-            return None, None
-
-        # 3. Consulta a Hunter.io API (si api_key está configurado)
+        # 3. Hunter.io (si está configurado): dominio del sitio o inferido del nombre real
         if self.settings.hunter_io_api_key:
-            hunter_email = await self.query_hunter_io(domain, recruiter_name=recruiter_name)
-            if hunter_email:
-                return hunter_email, "hunter_io"
-
-        # 4. Inferencia de alias corporativos / Guessing inteligente
-        resolves = await self.check_dns_resolution(domain)
-        if resolves:
-            # Selecciona el candidato de mayor probabilidad (jobs@{domain} o careers@{domain})
-            selected_email = f"jobs@{domain}"
-            return selected_email, "domain_guessing"
+            domain = site_domain or self.infer_domain_from_company(company)
+            if domain:
+                hunter_email = await self.query_hunter_io(domain, recruiter_name=recruiter_name)
+                if hunter_email:
+                    return hunter_email, EMAIL_SOURCE_HUNTER
 
         return None, None
