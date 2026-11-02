@@ -1,12 +1,26 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
 import logging
 from typing import Any
 import aiosqlite
 from eros.config import get_settings
+from eros.hunter.normalize import job_dedup_key
 from eros.models import JobOffer, JobStatus, ProfileContext
 
 logger = logging.getLogger(__name__)
+
+# Un envío marcado "sending" más viejo que esto se considera cortado (no sabemos si salió).
+STALE_SEND_MINUTES = 10
+
+_JOB_COLUMNS = (
+    "id, source, external_id, title, company, url, description, "
+    "tags, salary, country, is_remote, published_at, found_at, "
+    "status, match_score, match_analysis, pitch_draft, tailored_cv, "
+    "semantic_score, embedding, hiring_manager_name, hiring_manager_title, "
+    "hiring_manager_url, connection_note, contact_email, applied_at, scored_by, "
+    "contact_email_source, dedup_key"
+)
+_INSERT_JOB_SQL = f"INSERT INTO jobs ({_JOB_COLUMNS}) VALUES ({', '.join('?' for _ in _JOB_COLUMNS.split(','))})"
 
 
 class JobStorage:
@@ -70,7 +84,12 @@ class JobStorage:
                 "connection_note TEXT",
                 "contact_email TEXT",
                 "applied_at TEXT",
-                "scored_by TEXT"
+                "scored_by TEXT",
+                "contact_email_source TEXT",
+                "send_state TEXT",
+                "send_started_at TEXT",
+                "send_key TEXT",
+                "dedup_key TEXT",
             ]:
                 try:
                     await db.execute(f"ALTER TABLE jobs ADD COLUMN {col}")
@@ -101,14 +120,98 @@ class JobStorage:
                 )
             """)
 
+            # Vacantes borradas a mano: el escaneo no las vuelve a traer como nuevas.
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS seen_jobs (
+                    id TEXT PRIMARY KEY,
+                    dedup_key TEXT,
+                    reason TEXT,
+                    created_at TEXT NOT NULL
+                )
+            """)
+
             await db.execute("CREATE INDEX IF NOT EXISTS idx_jobs_source ON jobs(source)")
             await db.execute("CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status)")
             await db.execute("CREATE INDEX IF NOT EXISTS idx_jobs_score ON jobs(match_score)")
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_jobs_dedup ON jobs(dedup_key)")
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_seen_jobs_dedup ON seen_jobs(dedup_key)")
+
+            await self._backfill_dedup_keys(db)
+            await self._migrate_legacy_contact_emails(db)
             await db.commit()
+
+    async def _backfill_dedup_keys(self, db: aiosqlite.Connection) -> None:
+        async with db.execute("SELECT id, company, title, source FROM jobs WHERE dedup_key IS NULL") as cursor:
+            rows = await cursor.fetchall()
+        for job_id, company, title, source in rows:
+            await db.execute(
+                "UPDATE jobs SET dedup_key = ? WHERE id = ?",
+                (job_dedup_key(company, title, source), job_id),
+            )
+
+    async def _migrate_legacy_contact_emails(self, db: aiosqlite.Connection) -> None:
+        """Asigna fuente a los correos guardados antes de registrarla y borra los adivinados.
+
+        Antes Eros guardaba `jobs@<dominio>` armado a partir del nombre de la empresa o de la URL.
+        - Si el correo aparece en el aviso: fuente "posting".
+        - Si tiene la forma exacta de un correo adivinado y la vacante no fue postulada: se borra.
+        - Cualquier otro (no se sabe de dónde salió): fuente "unknown", que no se usa para
+          enviar sin que Mateo escriba la dirección.
+        """
+        from eros.hunter.email_finder import EmailFinder
+
+        async with db.execute("""
+            SELECT id, company, url, description, contact_email, status, applied_at
+            FROM jobs
+            WHERE contact_email IS NOT NULL AND contact_email != '' AND contact_email_source IS NULL
+        """) as cursor:
+            rows = await cursor.fetchall()
+        if not rows:
+            return
+
+        finder = EmailFinder()
+        guessed_prefixes = {"jobs", "careers", "talent", "hiring", "rrhh"}
+        for job_id, company, url, description, email, status, applied_at in rows:
+            email_l = (email or "").strip().lower()
+            if email_l in (description or "").lower():
+                await db.execute("UPDATE jobs SET contact_email_source = 'posting' WHERE id = ?", (job_id,))
+                continue
+
+            prefix, _, domain = email_l.partition("@")
+            guessed_domains = {
+                finder.extract_domain_from_url(url or ""),
+                finder.infer_domain_from_company(company or "", allow_placeholder=True),
+            }
+            looks_guessed = prefix in guessed_prefixes and domain in guessed_domains
+            was_applied = status == JobStatus.APPLIED.value or bool(applied_at)
+            if looks_guessed and not was_applied:
+                logger.info(f"Borrando correo adivinado heredado de la vacante {job_id}: {email_l}")
+                await db.execute("UPDATE jobs SET contact_email = NULL WHERE id = ?", (job_id,))
+            else:
+                await db.execute("UPDATE jobs SET contact_email_source = 'unknown' WHERE id = ?", (job_id,))
+
+    @staticmethod
+    def _insert_params(job: JobOffer) -> tuple:
+        email_source = None
+        if job.contact_email:
+            in_posting = job.contact_email.lower() in (job.description or "").lower()
+            email_source = job.contact_email_source or ("posting" if in_posting else "unknown")
+        return (
+            job.id, job.source, job.external_id, job.title, job.company, job.url,
+            job.description, json.dumps(job.tags), job.salary, job.country,
+            1 if job.is_remote else 0, job.published_at, job.found_at,
+            job.status.value, job.match_score, job.match_analysis, job.pitch_draft,
+            job.tailored_cv, job.semantic_score, json.dumps(job.embedding) if job.embedding else None,
+            job.hiring_manager_name, job.hiring_manager_title,
+            job.hiring_manager_url, job.connection_note, job.contact_email,
+            job.applied_at, job.scored_by,
+            email_source,
+            job_dedup_key(job.company, job.title, job.source),
+        )
 
     async def save_job(self, job: JobOffer) -> bool:
         """Guarda o actualiza una vacante. Devuelve True si es nueva.
-        
+
         Preserva status y campos evaluados previos si la actualización intenta
         resetear a 'new' o pasar valores nulos.
         """
@@ -117,27 +220,9 @@ class JobStorage:
                 row = await cursor.fetchone()
                 exists = row is not None
 
-            tags_json = json.dumps(job.tags)
             embedding_json = json.dumps(job.embedding) if job.embedding else None
             if not exists:
-                await db.execute("""
-                    INSERT INTO jobs (
-                        id, source, external_id, title, company, url, description,
-                        tags, salary, country, is_remote, published_at, found_at,
-                        status, match_score, match_analysis, pitch_draft, tailored_cv,
-                        semantic_score, embedding, hiring_manager_name, hiring_manager_title,
-                        hiring_manager_url, connection_note, contact_email, applied_at, scored_by
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    job.id, job.source, job.external_id, job.title, job.company, job.url,
-                    job.description, tags_json, job.salary, job.country,
-                    1 if job.is_remote else 0, job.published_at, job.found_at,
-                    job.status.value, job.match_score, job.match_analysis, job.pitch_draft,
-                    job.tailored_cv, job.semantic_score, embedding_json,
-                    job.hiring_manager_name, job.hiring_manager_title,
-                    job.hiring_manager_url, job.connection_note, job.contact_email,
-                    job.applied_at, job.scored_by
-                ))
+                await db.execute(_INSERT_JOB_SQL, self._insert_params(job))
             else:
                 await db.execute("""
                     UPDATE jobs SET
@@ -153,6 +238,9 @@ class JobStorage:
                         hiring_manager_title = COALESCE(?, hiring_manager_title),
                         hiring_manager_url = COALESCE(?, hiring_manager_url),
                         connection_note = COALESCE(?, connection_note),
+                        contact_email_source = CASE
+                            WHEN ? IS NOT NULL AND ? IS NOT NULL THEN ?
+                            ELSE contact_email_source END,
                         contact_email = COALESCE(?, contact_email),
                         applied_at = COALESCE(?, applied_at),
                         scored_by = COALESCE(?, scored_by)
@@ -162,7 +250,9 @@ class JobStorage:
                     job.match_score, job.match_analysis, job.pitch_draft,
                     job.tailored_cv, job.salary, job.semantic_score, embedding_json,
                     job.hiring_manager_name, job.hiring_manager_title,
-                    job.hiring_manager_url, job.connection_note, job.contact_email,
+                    job.hiring_manager_url, job.connection_note,
+                    job.contact_email, job.contact_email_source, job.contact_email_source,
+                    job.contact_email,
                     job.applied_at, job.scored_by, job.id
                 ))
 
@@ -172,38 +262,32 @@ class JobStorage:
     async def save_scraped_job(self, job: JobOffer) -> bool:
         """Guarda una vacante obtenida por escaneo continuo. Devuelve True si es nueva.
 
+        - Si el id fue borrado antes (seen_jobs), no la vuelve a traer.
+        - Si ya existe la misma vacante (empresa + título normalizados) desde otra fuente,
+          no la duplica.
         Si la vacante ya existía en la base de datos:
         - NO modifica ni resetea el status (preserva SAVED, APPLIED, DISCARDED, EVALUATED, etc.).
         - NO sobreescribe ni borra match_score, match_analysis, pitch_draft, tailored_cv,
           semantic_score, embedding ni scored_by.
         - Actualiza de forma segura únicamente los datos descriptivos del anuncio (título, descripción,
-          salario si viene informado, modalidad, tags y contact_email).
+          salario si viene informado, modalidad, tags y contact_email si no tenía).
         """
+        dedup_key = job_dedup_key(job.company, job.title, job.source)
         async with aiosqlite.connect(self.db_path) as db:
             async with db.execute("SELECT id FROM jobs WHERE id = ?", (job.id,)) as cursor:
                 exists = await cursor.fetchone() is not None
 
-            tags_json = json.dumps(job.tags)
-            embedding_json = json.dumps(job.embedding) if job.embedding else None
             if not exists:
-                await db.execute("""
-                    INSERT INTO jobs (
-                        id, source, external_id, title, company, url, description,
-                        tags, salary, country, is_remote, published_at, found_at,
-                        status, match_score, match_analysis, pitch_draft, tailored_cv,
-                        semantic_score, embedding, hiring_manager_name, hiring_manager_title,
-                        hiring_manager_url, connection_note, contact_email, applied_at, scored_by
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    job.id, job.source, job.external_id, job.title, job.company, job.url,
-                    job.description, tags_json, job.salary, job.country,
-                    1 if job.is_remote else 0, job.published_at, job.found_at,
-                    job.status.value, job.match_score, job.match_analysis, job.pitch_draft,
-                    job.tailored_cv, job.semantic_score, embedding_json,
-                    job.hiring_manager_name, job.hiring_manager_title,
-                    job.hiring_manager_url, job.connection_note, job.contact_email,
-                    job.applied_at, job.scored_by
-                ))
+                async with db.execute(
+                    "SELECT 1 FROM seen_jobs WHERE id = ? OR dedup_key = ? LIMIT 1", (job.id, dedup_key)
+                ) as cursor:
+                    if await cursor.fetchone():
+                        return False
+                async with db.execute("SELECT 1 FROM jobs WHERE dedup_key = ? LIMIT 1", (dedup_key,)) as cursor:
+                    if await cursor.fetchone():
+                        logger.debug(f"Vacante duplicada entre fuentes omitida: '{job.title}' en {job.company} ({job.source})")
+                        return False
+                await db.execute(_INSERT_JOB_SQL, self._insert_params(job))
             else:
                 await db.execute("""
                     UPDATE jobs SET
@@ -215,17 +299,21 @@ class JobStorage:
                         salary = COALESCE(?, salary),
                         country = COALESCE(?, country),
                         is_remote = ?,
-                        contact_email = COALESCE(?, contact_email)
+                        contact_email_source = CASE
+                            WHEN contact_email IS NULL AND ? IS NOT NULL THEN ?
+                            ELSE contact_email_source END,
+                        contact_email = COALESCE(contact_email, ?)
                     WHERE id = ?
                 """, (
                     job.title,
                     job.company,
                     job.url,
                     job.description,
-                    tags_json,
+                    json.dumps(job.tags),
                     job.salary,
                     job.country,
                     1 if job.is_remote else 0,
+                    job.contact_email, job.contact_email_source or "posting",
                     job.contact_email,
                     job.id
                 ))
@@ -303,26 +391,104 @@ class JobStorage:
                 rows = await cursor.fetchall()
                 return [self._row_to_job(r) for r in rows]
 
+    async def count_jobs(self, high_match_min_score: int = 75) -> dict[str, int]:
+        """Cuenta las vacantes por estado (cada vacante una sola vez) y las de puntaje alto."""
+        async with aiosqlite.connect(self.db_path) as db:
+            async with db.execute("SELECT status, COUNT(*) FROM jobs GROUP BY status") as cursor:
+                by_status = {row[0]: row[1] for row in await cursor.fetchall()}
+            async with db.execute(
+                "SELECT COUNT(*) FROM jobs WHERE match_score >= ? AND status != ?",
+                (high_match_min_score, JobStatus.DISCARDED.value),
+            ) as cursor:
+                high = (await cursor.fetchone())[0]
+        return {
+            "total": sum(by_status.values()),
+            "high_match": high,
+            **{s.value: by_status.get(s.value, 0) for s in JobStatus},
+        }
+
     async def update_job_status(self, job_id: str, status: JobStatus) -> None:
         """Actualiza el estado de una vacante (ej: aplicada, descartada)."""
         now_iso = datetime.now(timezone.utc).isoformat()
         async with aiosqlite.connect(self.db_path) as db:
             if status == JobStatus.APPLIED:
                 await db.execute(
-                    "UPDATE jobs SET status = ?, applied_at = COALESCE(applied_at, ?) WHERE id = ?",
+                    "UPDATE jobs SET status = ?, applied_at = COALESCE(applied_at, ?), send_state = NULL WHERE id = ?",
                     (status.value, now_iso, job_id)
                 )
             else:
                 await db.execute("UPDATE jobs SET status = ? WHERE id = ?", (status.value, job_id))
             await db.commit()
 
-    async def update_job_contact_email(self, job_id: str, contact_email: str | None) -> None:
-        """Actualiza el correo de contacto para postulación de una vacante."""
+    async def update_job_contact_email(self, job_id: str, contact_email: str | None, source: str | None = "manual") -> None:
+        """Actualiza el correo de contacto de una vacante junto con su fuente."""
         async with aiosqlite.connect(self.db_path) as db:
-            await db.execute("UPDATE jobs SET contact_email = ? WHERE id = ?", (contact_email, job_id))
+            await db.execute(
+                "UPDATE jobs SET contact_email = ?, contact_email_source = ? WHERE id = ?",
+                (contact_email, source if contact_email else None, job_id),
+            )
             await db.commit()
 
-    async def record_application(self, job_id: str, contact_email: str | None = None) -> None:
+    async def claim_send(self, job_id: str, send_key: str, force_retry: bool = False) -> str:
+        """Marca de forma atómica que la postulación se está enviando.
+
+        Devuelve "claimed" si este llamado ganó el derecho a enviar. Si no:
+        "applied" (ya se postuló), "sending" (otro envío en curso), "unknown"
+        (un envío anterior se cortó sin saber si salió; reintentar exige force_retry)
+        o "missing" (la vacante no existe).
+        """
+        now = datetime.now(timezone.utc)
+        stale_cutoff = (now - timedelta(minutes=STALE_SEND_MINUTES)).isoformat()
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute("""
+                UPDATE jobs SET send_state = 'sending', send_started_at = ?, send_key = ?
+                WHERE id = ?
+                  AND applied_at IS NULL
+                  AND status != ?
+                  AND (
+                    send_state IS NULL
+                    OR (? = 1 AND send_state = 'unknown')
+                    OR (? = 1 AND send_state = 'sending' AND send_started_at < ?)
+                  )
+            """, (
+                now.isoformat(), send_key, job_id, JobStatus.APPLIED.value,
+                1 if force_retry else 0, 1 if force_retry else 0, stale_cutoff,
+            ))
+            await db.commit()
+            if cursor.rowcount == 1:
+                return "claimed"
+
+            async with db.execute(
+                "SELECT status, applied_at, send_state, send_started_at FROM jobs WHERE id = ?", (job_id,)
+            ) as cur:
+                row = await cur.fetchone()
+        if not row:
+            return "missing"
+        status, applied_at, send_state, send_started_at = row
+        if status == JobStatus.APPLIED.value or applied_at:
+            return "applied"
+        if send_state == "sending" and (send_started_at or "") >= stale_cutoff:
+            return "sending"
+        return "unknown"
+
+    async def release_send(self, job_id: str) -> None:
+        """Libera la marca de envío cuando el proveedor rechazó el envío (seguro que no salió)."""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                "UPDATE jobs SET send_state = NULL, send_started_at = NULL WHERE id = ? AND send_state = 'sending'",
+                (job_id,),
+            )
+            await db.commit()
+
+    async def mark_send_unknown(self, job_id: str) -> None:
+        """Deja constancia de que un envío se cortó y no sabemos si salió."""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("UPDATE jobs SET send_state = 'unknown' WHERE id = ? AND send_state = 'sending'", (job_id,))
+            await db.commit()
+
+    async def record_application(
+        self, job_id: str, contact_email: str | None = None, contact_email_source: str | None = None
+    ) -> None:
         """Marca una vacante como postulada con fecha y correo de envío."""
         now_iso = datetime.now(timezone.utc).isoformat()
         async with aiosqlite.connect(self.db_path) as db:
@@ -330,38 +496,59 @@ class JobStorage:
                 UPDATE jobs SET
                     status = ?,
                     applied_at = ?,
+                    send_state = NULL,
+                    contact_email_source = CASE WHEN ? IS NOT NULL THEN COALESCE(?, contact_email_source) ELSE contact_email_source END,
                     contact_email = COALESCE(?, contact_email)
                 WHERE id = ?
-            """, (JobStatus.APPLIED.value, now_iso, contact_email, job_id))
+            """, (
+                JobStatus.APPLIED.value, now_iso,
+                contact_email, contact_email_source,
+                contact_email, job_id,
+            ))
             await db.commit()
 
+    async def _remember_deleted(self, db: aiosqlite.Connection, where: str, params: tuple, reason: str) -> None:
+        now_iso = datetime.now(timezone.utc).isoformat()
+        await db.execute(f"""
+            INSERT OR IGNORE INTO seen_jobs (id, dedup_key, reason, created_at)
+            SELECT id, dedup_key, ?, ? FROM jobs WHERE {where}
+        """, (reason, now_iso, *params))
+
     async def delete_job(self, job_id: str) -> None:
-        """Elimina físicamente una vacante de la base de datos."""
+        """Elimina una vacante y recuerda su id para que el escaneo no la traiga de vuelta."""
         async with aiosqlite.connect(self.db_path) as db:
+            await self._remember_deleted(db, "id = ?", (job_id,), "deleted")
             await db.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
             await db.commit()
 
-    async def purge_unqualified_and_discarded_jobs(self, ids: list[str]) -> int:
-        """Elimina físicamente una lista de vacantes por ID de la base de datos."""
+    async def discard_jobs(self, ids: list[str]) -> int:
+        """Marca como descartadas (sin borrarlas) las vacantes indicadas. Nunca toca las postuladas."""
         if not ids:
             return 0
         async with aiosqlite.connect(self.db_path) as db:
             placeholders = ",".join("?" for _ in ids)
-            cursor = await db.execute(f"DELETE FROM jobs WHERE id IN ({placeholders})", tuple(ids))
+            cursor = await db.execute(
+                f"UPDATE jobs SET status = ? WHERE id IN ({placeholders}) AND status NOT IN (?, ?) AND applied_at IS NULL",
+                (JobStatus.DISCARDED.value, *ids, JobStatus.APPLIED.value, JobStatus.DISCARDED.value),
+            )
             await db.commit()
             return cursor.rowcount
 
     async def delete_all_discarded_jobs(self) -> int:
-        """Elimina físicamente todas las vacantes en estado descartado."""
+        """Elimina las vacantes descartadas recordando sus ids para que no vuelvan como nuevas."""
         async with aiosqlite.connect(self.db_path) as db:
+            await self._remember_deleted(db, "status = ?", (JobStatus.DISCARDED.value,), "deleted")
             cursor = await db.execute("DELETE FROM jobs WHERE status = ?", (JobStatus.DISCARDED.value,))
             await db.commit()
             return cursor.rowcount
 
     async def delete_all_jobs(self) -> int:
-        """Elimina físicamente todas las vacantes escaneadas de la base de datos."""
+        """Elimina las vacantes no postuladas, recordando sus ids. Las postuladas son historial y quedan."""
+        where = "status != ? AND applied_at IS NULL"
+        params = (JobStatus.APPLIED.value,)
         async with aiosqlite.connect(self.db_path) as db:
-            cursor = await db.execute("DELETE FROM jobs")
+            await self._remember_deleted(db, where, params, "deleted_all")
+            cursor = await db.execute(f"DELETE FROM jobs WHERE {where}", params)
             await db.commit()
             return cursor.rowcount
 
@@ -383,6 +570,16 @@ class JobStorage:
                     return ProfileContext.model_validate_json(row[0])
                 return None
 
+    async def ping(self) -> bool:
+        """Comprueba que la base responde (para el healthcheck)."""
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                async with db.execute("SELECT 1") as cursor:
+                    return (await cursor.fetchone())[0] == 1
+        except Exception as e:
+            logger.error(f"La base SQLite no responde: {e}")
+            return False
+
     def _row_to_job(self, row: aiosqlite.Row) -> JobOffer:
         tags = []
         if row["tags"]:
@@ -392,22 +589,16 @@ class JobStorage:
                 pass
 
         keys = row.keys() if hasattr(row, "keys") else []
-        tailored_cv = row["tailored_cv"] if "tailored_cv" in keys else None
-        semantic_score = row["semantic_score"] if "semantic_score" in keys else None
+
+        def col(name: str) -> Any:
+            return row[name] if name in keys else None
+
         embedding = None
-        if "embedding" in keys and row["embedding"]:
+        if col("embedding"):
             try:
                 embedding = json.loads(row["embedding"])
             except Exception:
                 pass
-
-        hiring_manager_name = row["hiring_manager_name"] if "hiring_manager_name" in keys else None
-        hiring_manager_title = row["hiring_manager_title"] if "hiring_manager_title" in keys else None
-        hiring_manager_url = row["hiring_manager_url"] if "hiring_manager_url" in keys else None
-        connection_note = row["connection_note"] if "connection_note" in keys else None
-        contact_email = row["contact_email"] if "contact_email" in keys else None
-        applied_at = row["applied_at"] if "applied_at" in keys else None
-        scored_by = row["scored_by"] if "scored_by" in keys else None
 
         return JobOffer(
             id=row["id"],
@@ -427,16 +618,19 @@ class JobStorage:
             match_score=row["match_score"],
             match_analysis=row["match_analysis"],
             pitch_draft=row["pitch_draft"],
-            tailored_cv=tailored_cv,
-            semantic_score=semantic_score,
+            tailored_cv=col("tailored_cv"),
+            semantic_score=col("semantic_score"),
             embedding=embedding,
-            hiring_manager_name=hiring_manager_name,
-            hiring_manager_title=hiring_manager_title,
-            hiring_manager_url=hiring_manager_url,
-            connection_note=connection_note,
-            contact_email=contact_email,
-            applied_at=applied_at,
-            scored_by=scored_by,
+            hiring_manager_name=col("hiring_manager_name"),
+            hiring_manager_title=col("hiring_manager_title"),
+            hiring_manager_url=col("hiring_manager_url"),
+            connection_note=col("connection_note"),
+            contact_email=col("contact_email"),
+            contact_email_source=col("contact_email_source"),
+            applied_at=col("applied_at"),
+            scored_by=col("scored_by"),
+            send_state=col("send_state"),
+            send_started_at=col("send_started_at"),
         )
 
     async def update_job_embedding(self, job_id: str, embedding: list[float], semantic_score: int) -> None:

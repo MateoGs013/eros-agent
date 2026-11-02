@@ -188,8 +188,8 @@ class TestPhase4HiringDetective(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(self._has_emojis(res.recruiter_note))
         self.assertIn("mateogs.tech", res.recruiter_note)
 
-    async def test_07_matcher_fallback_note_when_llm_fails(self):
-        """Verifica que el fallback del matcher produzca una nota válida < 280 chars y sin emojis."""
+    async def test_07_matcher_fallback_writes_no_note_when_llm_fails(self):
+        """Sin IA, la estimación heurística no redacta notas de conexión ni inventa el resumen."""
         mock_llm = MagicMock()
         mock_llm.generate = AsyncMock(side_effect=Exception("API Timeout"))
 
@@ -205,10 +205,10 @@ class TestPhase4HiringDetective(unittest.IsolatedAsyncioTestCase):
         )
 
         res = await matcher.evaluate(job, self.sample_profile)
-        self.assertIsNotNone(res.recruiter_note)
-        self.assertLess(len(res.recruiter_note), 280)
-        self.assertFalse(self._has_emojis(res.recruiter_note))
-        self.assertIn("Marcos", res.recruiter_note)
+        self.assertEqual(res.scored_by, "heuristic")
+        self.assertIsNone(res.recruiter_note)
+        self.assertIn("Estimación heurística sin IA", res.summary)
+        self.assertNotIn("compatibilidad del", res.summary)
 
     async def test_08_hunter_engine_persists_match_fields(self):
         """Verifica que JobHunterEngine persista connection_note y hiring manager tras evaluar."""

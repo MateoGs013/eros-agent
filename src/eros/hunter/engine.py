@@ -4,7 +4,7 @@ import logging
 from eros.config import get_settings
 from eros.db.storage import JobStorage
 from eros.hunter.cv_generator import CVGenerator
-from eros.hunter.email_finder import EmailFinder
+from eros.hunter.email_finder import EMAIL_SOURCE_POSTING, EmailFinder
 from eros.hunter.filters import check_job_qualification, extract_contact_email
 from eros.hunter.dispatcher import JobApplicationDispatcher
 from eros.hunter.matcher import JobMatcher
@@ -36,6 +36,11 @@ from eros.hunter.embeddings import (
 logger = logging.getLogger(__name__)
 
 
+class ScanInProgressError(RuntimeError):
+    """Ya hay un escaneo (o una evaluación en lote) corriendo en este proceso."""
+    pass
+
+
 class HunterEngine:
     """Orquestador central del ciclo de búsqueda, deduplicación y scoring de vacantes."""
 
@@ -47,6 +52,9 @@ class HunterEngine:
         self.pitch_gen = PitchGenerator()
         self.cv_gen = CVGenerator()
         self.email_finder = EmailFinder(self.settings)
+        # Exclusión de escaneos/evaluaciones simultáneos (chequeo y marca sin await en el medio)
+        self._scan_running = False
+        self._evaluation_running = False
         self.app_dispatcher = JobApplicationDispatcher(storage=self.storage, engine=self)
         self.sources: list[BaseJobSource] = [
             RemotiveSource(),
@@ -59,16 +67,18 @@ class HunterEngine:
         ]
 
     async def initialize(self) -> None:
-        """Inicializa la base de datos y sincroniza el perfil inicial si no existe."""
+        """Inicializa la base de datos y sincroniza el perfil inicial si no existe.
+
+        No borra ni descarta vacantes: el historial (descartadas, postuladas) se conserva.
+        """
         await self.storage.init_db()
-        await self.clean_existing_unqualified_jobs()
         await self.backfill_missing_contact_emails()
         cached = await self.storage.get_profile_cache()
         if not cached:
             await self.sync_profile()
 
     async def backfill_missing_contact_emails(self, limit: int = 500) -> int:
-        """Extrae y actualiza retroactivamente correos de contacto en vacantes existentes."""
+        """Completa el correo de contacto de vacantes que lo tienen publicado en el aviso."""
         all_jobs = await self.storage.list_all_jobs(limit=limit)
         updated = 0
         for j in all_jobs:
@@ -76,54 +86,46 @@ class HunterEngine:
                 email = extract_contact_email(j.description)
                 if email:
                     j.contact_email = email
-                    await self.storage.update_job_contact_email(j.id, email)
+                    await self.storage.update_job_contact_email(j.id, email, source=EMAIL_SOURCE_POSTING)
                     updated += 1
         if updated > 0:
             logger.info(f"Se detectaron y actualizaron {updated} correos de contacto en vacantes existentes.")
         return updated
 
-    async def purge_incompatible_and_discarded_jobs(self) -> int:
-        """Purga y elimina físicamente de la base de datos las vacantes incompatibles y descartadas."""
-        deleted_count = 0
+    async def discard_incompatible_jobs(self) -> int:
+        """Marca como descartadas (sin borrarlas) las vacantes que no pasan los filtros actuales.
+
+        Nunca toca las postuladas. Las descartadas siguen en la base para que un nuevo
+        escaneo no las traiga de vuelta como nuevas.
+        """
         try:
-            all_jobs = await self.storage.list_all_jobs(limit=1000)
-            ids_to_purge: set[str] = set()
-
+            all_jobs = await self.storage.list_all_jobs(limit=5000)
+            ids_to_discard: list[str] = []
             for j in all_jobs:
-                # 1. Ya en estado descartado
-                if j.status == JobStatus.DISCARDED:
-                    ids_to_purge.add(j.id)
+                if j.status in (JobStatus.DISCARDED, JobStatus.APPLIED) or j.applied_at:
                     continue
-
-                # 2. Incompatible por filtros geográficos o stack
                 qual = check_job_qualification(
                     title=j.title,
                     description=j.description,
                     country=j.country,
                     tags=j.tags,
                 )
-                if not qual.qualified:
-                    ids_to_purge.add(j.id)
-                    continue
-
-                # 3. Match score evaluado muy bajo (<= 35%)
-                if j.match_score is not None and j.match_score <= 35:
-                    ids_to_purge.add(j.id)
-                    continue
-
-            if ids_to_purge:
-                deleted_count = await self.storage.purge_unqualified_and_discarded_jobs(list(ids_to_purge))
-                logger.info(f"Purga física ejecutada: {deleted_count} vacantes incompatibles/descartadas eliminadas de SQLite.")
+                if not qual.qualified or (j.match_score is not None and j.match_score <= 35):
+                    ids_to_discard.append(j.id)
+            discarded = await self.storage.discard_jobs(ids_to_discard)
+            if discarded:
+                logger.info(f"{discarded} vacantes incompatibles marcadas como descartadas.")
+            return discarded
         except Exception as e:
-            logger.warning(f"Error durante purga de vacantes incompatibles: {e}")
-        return deleted_count
+            logger.warning(f"Error al descartar vacantes incompatibles: {e}")
+            return 0
 
     async def clean_existing_unqualified_jobs(self) -> int:
-        """Alias para purga completa de vacantes no calificadas/descartadas."""
-        return await self.purge_incompatible_and_discarded_jobs()
+        """Alias histórico de discard_incompatible_jobs (ya no borra físicamente)."""
+        return await self.discard_incompatible_jobs()
 
     async def clear_all_jobs(self) -> int:
-        """Elimina todas las vacantes escaneadas de la base de datos para escanear desde cero."""
+        """Elimina las vacantes no postuladas recordando sus ids (no vuelven como nuevas)."""
         deleted = await self.storage.delete_all_jobs()
         logger.info(f"Todas las vacantes escaneadas ({deleted}) fueron eliminadas.")
         return deleted
@@ -215,8 +217,28 @@ class HunterEngine:
         jobs_with_scores.sort(key=lambda x: x[1], reverse=True)
         return [j for j, _ in jobs_with_scores[:limit]]
 
+    @property
+    def scan_in_progress(self) -> bool:
+        return self._scan_running
+
+    @property
+    def evaluation_in_progress(self) -> bool:
+        return self._evaluation_running
+
     async def run_scan(self) -> dict[str, int]:
-        """Ejecuta una búsqueda en todas las fuentes curadas y guarda únicamente las ofertas calificadas."""
+        """Ejecuta una búsqueda en todas las fuentes curadas y guarda únicamente las ofertas calificadas.
+
+        Lanza ScanInProgressError si ya hay un escaneo corriendo.
+        """
+        if self._scan_running:
+            raise ScanInProgressError("Ya hay un escaneo en curso.")
+        self._scan_running = True
+        try:
+            return await self._run_scan()
+        finally:
+            self._scan_running = False
+
+    async def _run_scan(self) -> dict[str, int]:
         await self.initialize()
         total_found = 0
         new_jobs = 0
@@ -266,6 +288,8 @@ class HunterEngine:
             # Extraer correo de contacto laboral si está presente en la descripción
             if not job.contact_email and job.description:
                 job.contact_email = extract_contact_email(job.description)
+            if job.contact_email:
+                job.contact_email_source = job.contact_email_source or EMAIL_SOURCE_POSTING
 
             is_new = await self.storage.save_scraped_job(job)
             if is_new:
@@ -279,8 +303,72 @@ class HunterEngine:
         logger.info(f"Escaneo finalizado: {total_found} ofertas evaluadas, {new_jobs} nuevas ingresadas a la base.")
         return {"total_found": total_found, "new_jobs": new_jobs}
 
+    async def _min_score(self) -> int:
+        min_score_str = await self.storage.get_setting("match_min_score", str(self.settings.match_min_score))
+        try:
+            return int(min_score_str) if min_score_str else self.settings.match_min_score
+        except ValueError:
+            return self.settings.match_min_score
+
+    async def _resolve_contact_email(self, job: JobOffer) -> None:
+        """Busca un correo real (aviso, sitio de la empresa o Hunter.io) si la vacante no tiene."""
+        if job.contact_email:
+            return
+        found_email, source = await self.email_finder.resolve_contact_email(
+            company=job.company,
+            job_url=job.url,
+            recruiter_name=job.hiring_manager_name,
+            description=job.description,
+        )
+        if found_email:
+            job.contact_email = found_email
+            job.contact_email_source = source
+            logger.info(f"Email de contacto resuelto para '{job.company}': {found_email} (fuente: {source})")
+
+    def _apply_match(self, job: JobOffer, match: MatchResult, min_score: int) -> None:
+        """Vuelca el resultado de la evaluación en la vacante y decide su estado.
+
+        Una estimación heurística (sin IA) nunca deja la vacante en SAVED: queda en
+        EVALUATED para revisarla a mano, o DISCARDED si hubo una incompatibilidad explícita.
+        """
+        heuristic = getattr(match, "scored_by", "gemini") == "heuristic"
+        job.match_score = match.score
+        job.match_analysis = json.dumps(match.model_dump())
+        job.scored_by = getattr(match, "scored_by", "gemini")
+        if not heuristic and (not job.salary or not job.salary.strip()) and match.salary_estimate:
+            job.salary = match.salary_estimate
+
+        # Persistir detective de hiring manager y nota de conexión LinkedIn
+        if match.recruiter_note and not heuristic:
+            job.connection_note = match.recruiter_note
+        if match.hiring_manager_name and not job.hiring_manager_name:
+            job.hiring_manager_name = match.hiring_manager_name
+        if match.hiring_manager_title and not job.hiring_manager_title:
+            job.hiring_manager_title = match.hiring_manager_title
+        if match.hiring_manager_url and not job.hiring_manager_url:
+            job.hiring_manager_url = match.hiring_manager_url
+
+        if match.verdict == "DESCARTAR" or (not heuristic and match.score <= 35):
+            job.status = JobStatus.DISCARDED
+        elif heuristic or match.score < min_score:
+            job.status = JobStatus.EVALUATED
+        else:
+            job.status = JobStatus.SAVED
+
     async def evaluate_pending_jobs(self, limit: int = 25) -> list[tuple[JobOffer, MatchResult]]:
-        """Evalúa las vacantes pendientes con el modelo de IA aplicando criterios estrictos."""
+        """Evalúa las vacantes pendientes con el modelo de IA aplicando criterios estrictos.
+
+        Lanza ScanInProgressError si ya hay una evaluación en lote corriendo.
+        """
+        if self._evaluation_running:
+            raise ScanInProgressError("Ya hay una evaluación en curso.")
+        self._evaluation_running = True
+        try:
+            return await self._evaluate_pending_jobs(limit)
+        finally:
+            self._evaluation_running = False
+
+    async def _evaluate_pending_jobs(self, limit: int) -> list[tuple[JobOffer, MatchResult]]:
         profile = await self.get_active_profile()
         unseen = await self.storage.list_unseen_jobs()
         evaluated_matches: list[tuple[JobOffer, MatchResult]] = []
@@ -290,12 +378,7 @@ class HunterEngine:
         if unembedded:
             await self.vectorize_and_score_jobs(unembedded)
 
-        # Obtener umbral dinámico de la base de datos
-        min_score_str = await self.storage.get_setting("match_min_score", str(self.settings.match_min_score))
-        try:
-            min_score = int(min_score_str) if min_score_str else self.settings.match_min_score
-        except ValueError:
-            min_score = self.settings.match_min_score
+        min_score = await self._min_score()
 
         # Ordenar vacantes pendientes por afinidad semántica descendente (las mejores primero)
         batch = sorted(unseen[:limit], key=lambda j: (j.semantic_score or 0), reverse=True)
@@ -309,43 +392,8 @@ class HunterEngine:
 
             logger.info(f"Evaluando compatibilidad: {job.title} en {job.company} (Semántico: {job.semantic_score or 0}%)...")
             match = await self.matcher.evaluate(job, profile)
-            
-            job.match_score = match.score
-            job.match_analysis = json.dumps(match.model_dump())
-            job.scored_by = getattr(match, "scored_by", "gemini")
-            if (not job.salary or not job.salary.strip()) and match.salary_estimate:
-                job.salary = match.salary_estimate
-
-            # Persistir detective de hiring manager y nota de conexión LinkedIn
-            if match.recruiter_note:
-                job.connection_note = match.recruiter_note
-            if match.hiring_manager_name and not job.hiring_manager_name:
-                job.hiring_manager_name = match.hiring_manager_name
-            if match.hiring_manager_title and not job.hiring_manager_title:
-                job.hiring_manager_title = match.hiring_manager_title
-            if match.hiring_manager_url and not job.hiring_manager_url:
-                job.hiring_manager_url = match.hiring_manager_url
-
-            # Resolución automática de correo de selección si no está presente
-            if not job.contact_email:
-                found_email, source = await self.email_finder.resolve_contact_email(
-                    company=job.company,
-                    job_url=job.url,
-                    recruiter_name=job.hiring_manager_name,
-                    description=job.description,
-                )
-                if found_email:
-                    job.contact_email = found_email
-                    logger.info(f"Email de contacto resuelto automáticamente para '{job.company}': {found_email} (fuente: {source})")
-
-            # Si el modelo determinó DESCARTAR o incompatibilidad legal/geográfica
-            if match.score <= 35 or match.verdict == "DESCARTAR":
-                job.status = JobStatus.DISCARDED
-            elif match.score < min_score:
-                job.status = JobStatus.EVALUATED
-            else:
-                job.status = JobStatus.SAVED
-
+            self._apply_match(job, match, min_score)
+            await self._resolve_contact_email(job)
             await self.storage.save_job(job)
             evaluated_matches.append((job, match))
 
@@ -358,49 +406,12 @@ class HunterEngine:
             return None
 
         profile = await self.get_active_profile()
-        min_score_str = await self.storage.get_setting("match_min_score", str(self.settings.match_min_score))
-        try:
-            min_score = int(min_score_str) if min_score_str else self.settings.match_min_score
-        except ValueError:
-            min_score = self.settings.match_min_score
+        min_score = await self._min_score()
 
         logger.info(f"Evaluando vacante individual: {job.title} en {job.company}...")
         match = await self.matcher.evaluate(job, profile)
-        job.match_score = match.score
-        job.match_analysis = json.dumps(match.model_dump())
-        job.scored_by = getattr(match, "scored_by", "gemini")
-        if (not job.salary or not job.salary.strip()) and match.salary_estimate:
-            job.salary = match.salary_estimate
-
-        # Persistir detective de hiring manager y nota de conexión LinkedIn
-        if match.recruiter_note:
-            job.connection_note = match.recruiter_note
-        if match.hiring_manager_name and not job.hiring_manager_name:
-            job.hiring_manager_name = match.hiring_manager_name
-        if match.hiring_manager_title and not job.hiring_manager_title:
-            job.hiring_manager_title = match.hiring_manager_title
-        if match.hiring_manager_url and not job.hiring_manager_url:
-            job.hiring_manager_url = match.hiring_manager_url
-
-        # Resolución automática de correo de selección si no está presente
-        if not job.contact_email:
-            found_email, source = await self.email_finder.resolve_contact_email(
-                company=job.company,
-                job_url=job.url,
-                recruiter_name=job.hiring_manager_name,
-                description=job.description,
-            )
-            if found_email:
-                job.contact_email = found_email
-                logger.info(f"Email de contacto resuelto automáticamente para '{job.company}': {found_email} (fuente: {source})")
-
-        if match.score <= 35 or match.verdict == "DESCARTAR":
-            job.status = JobStatus.DISCARDED
-        elif match.score < min_score:
-            job.status = JobStatus.EVALUATED
-        else:
-            job.status = JobStatus.SAVED
-
+        self._apply_match(job, match, min_score)
+        await self._resolve_contact_email(job)
         await self.storage.save_job(job)
         return job, match
 
@@ -443,38 +454,23 @@ class HunterEngine:
         await self.storage.save_job(job)
         return tailored_cv, html
 
-    async def get_cv_html_for_job(self, job_id: str) -> str | None:
-        """Obtiene o renderiza el HTML imprimible del CV de una vacante."""
-        job = await self.storage.get_job(job_id)
-        if not job:
+    def _stored_cv(self, job: JobOffer) -> TailoredCV | None:
+        if not job.tailored_cv:
+            return None
+        try:
+            return TailoredCV.model_validate_json(job.tailored_cv)
+        except Exception as e:
+            logger.error(f"CV guardado ilegible para la vacante {job.id}: {e}")
             return None
 
-        if job.tailored_cv:
-            try:
-                cv_data = TailoredCV.model_validate_json(job.tailored_cv)
-                return self.cv_gen.render_harvard_html(cv_data)
-            except Exception:
-                pass
-
-        res = await self.generate_cv_for_job(job_id)
-        return res[1] if res else None
+    async def get_cv_html_for_job(self, job_id: str) -> str | None:
+        """Renderiza el HTML imprimible del CV ya guardado de una vacante (nunca lo genera)."""
+        job = await self.storage.get_job(job_id)
+        cv_data = self._stored_cv(job) if job else None
+        return self.cv_gen.render_harvard_html(cv_data) if cv_data else None
 
     async def get_cv_pdf_for_job(self, job_id: str) -> bytes | None:
-        """Obtiene o renderiza el PDF (1 página A4 Harvard ATS) del CV adaptado para una vacante."""
+        """Renderiza el PDF (1 página A4 Harvard ATS) del CV ya guardado de una vacante (nunca lo genera)."""
         job = await self.storage.get_job(job_id)
-        if not job:
-            return None
-
-        if job.tailored_cv:
-            try:
-                cv_data = TailoredCV.model_validate_json(job.tailored_cv)
-                return self.cv_gen.render_pdf(cv_data)
-            except Exception as e:
-                logger.error(f"Error parseando tailored_cv guardado para PDF: {e}")
-
-        res = await self.generate_cv_for_job(job_id)
-        if res:
-            tailored_cv, _ = res
-            return self.cv_gen.render_pdf(tailored_cv)
-        return None
-
+        cv_data = self._stored_cv(job) if job else None
+        return self.cv_gen.render_pdf(cv_data) if cv_data else None
