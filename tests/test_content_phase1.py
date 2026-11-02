@@ -18,6 +18,7 @@ from eros.content.storage import ContentStorage
 from eros.content.carousel import CarouselRenderer
 from eros.content.generator import ContentGenerator
 from eros.content.dispatcher import ContentDispatcher
+from eros.integrations.llm import LLMOutputError
 
 
 class TestPhase1ContentAudit(unittest.IsolatedAsyncioTestCase):
@@ -187,23 +188,14 @@ class TestPhase1ContentAudit(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(post.title, "Arquitectura Hexagonal en Node.js")
         self.assertEqual(len(post.carousel_slides), 1)
 
-        # Verificar fallback cuando LLM devuelve JSON inválido
-        fallback_post = generator._parse_response(
-            "INVALID_JSON_RESPONSE",
-            topic="Fallback Test",
-            pillar=ContentPillar.ARCHITECTURE,
-            project_slug=None,
-        )
-        self.assertIn("Fallback Test", fallback_post.title)
-        
-        # Verificar regla estricta de CERO EMOJIS en fallback
-        fallback_json = json.dumps(fallback_post.model_dump())
-        emojis_found = self.emoji_pattern.findall(fallback_json)
-        self.assertEqual(
-            len(emojis_found),
-            0,
-            f"El post de fallback contiene emojis: {emojis_found}"
-        )
+        # JSON inválido: no hay post de relleno, falla con un error claro
+        with self.assertRaises(LLMOutputError):
+            generator._parse_response(
+                "INVALID_JSON_RESPONSE",
+                topic="Fallback Test",
+                pillar=ContentPillar.ARCHITECTURE,
+                project_slug=None,
+            )
 
     async def test_05_dispatcher_local_and_remote(self):
         """Valida el dispatcher tanto en modo local (sin webhook) como despachando a n8n."""
@@ -234,9 +226,10 @@ class TestPhase1ContentAudit(unittest.IsolatedAsyncioTestCase):
                 with patch("httpx.AsyncClient.post", return_value=mock_resp):
                     res2 = await dispatcher.publish_post(self.sample_post.id)
                     self.assertTrue(res2["ok"])
-                    self.assertEqual(res2["status"], "published")
+                    # Despachada a n8n; PUBLISHED recién con el callback de n8n
+                    self.assertEqual(res2["status"], "dispatched")
                     saved2 = await storage.get_post(self.sample_post.id)
-                    self.assertEqual(saved2.status, ContentPostStatus.PUBLISHED)
+                    self.assertEqual(saved2.status, ContentPostStatus.APPROVED)
                     self.assertIn("flow_123", saved2.n8n_response)
         finally:
             if os.path.exists(tmp_db):

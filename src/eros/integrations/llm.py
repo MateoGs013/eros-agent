@@ -14,12 +14,43 @@ class GeminiQuotaExceededError(RuntimeError):
     pass
 
 
+class LLMUnavailableError(RuntimeError):
+    """No hay IA disponible (sin clave, cuota agotada o todos los modelos fallaron).
+
+    Lo que necesita redacción real (CV, pitch, posts) falla con este error en vez de
+    inventar texto: el modo heurístico solo existe para estimar el puntaje de una vacante.
+    """
+    pass
+
+
+class LLMOutputError(RuntimeError):
+    """La IA respondió, pero con algo que no se puede usar (JSON inválido o incompleto)."""
+    pass
+
+
 class LLMClient:
-    """Cliente unificado y asíncrono para Gemini y Claude con soporte para cascada de modelos y fallback inteligente."""
+    """Cliente unificado y asíncrono para Gemini y Claude con soporte para cascada de modelos.
+
+    Sin IA disponible, generate() lanza LLMUnavailableError salvo que se pida
+    allow_heuristic=True, que devuelve una estimación de compatibilidad de vacante
+    marcada con scored_by="heuristic".
+    """
+
+    # Pausa por cuota agotada compartida por todos los clientes del proceso
+    _quota_exhausted_until: float = 0.0
 
     def __init__(self):
         self.settings = get_settings()
-        self._quota_exhausted_until: float = 0.0
+
+    @staticmethod
+    def _start_quota_cooldown() -> None:
+        LLMClient._quota_exhausted_until = time.time() + 300.0
+
+    def _unavailable(self, prompt: str, allow_heuristic: bool, reason: str) -> str:
+        if allow_heuristic:
+            logger.info(f"{reason} Usando estimación heurística de compatibilidad (scored_by=heuristic).")
+            return self._heuristic_evaluate_job(prompt)
+        raise LLMUnavailableError(reason)
 
     async def generate(
         self,
@@ -29,8 +60,13 @@ class LLMClient:
         temperature: float = 0.3,
         json_mode: bool = False,
         max_tokens: int = 4096,
+        allow_heuristic: bool = False,
     ) -> str:
-        """Genera una respuesta utilizando el proveedor configurado con cascada de modelos."""
+        """Genera una respuesta utilizando el proveedor configurado con cascada de modelos.
+
+        allow_heuristic=True solo para evaluar vacantes: sin IA devuelve la estimación
+        heurística. Para todo lo demás, sin IA lanza LLMUnavailableError.
+        """
         if prefer_model == "claude" and self.settings.anthropic_api_key:
             try:
                 return await self._call_claude(prompt, system_prompt)
@@ -39,9 +75,8 @@ class LLMClient:
 
         if self.settings.gemini_api_key:
             # Si estamos en ventana de cooldown por cuota agotada de Gemini, usar fallback heurístico de inmediato
-            if time.time() < self._quota_exhausted_until:
-                logger.info("Cuota de Gemini en ventana de cooldown. Usando evaluador heurístico inteligente inmediato...")
-                return self._heuristic_fallback(prompt)
+            if time.time() < LLMClient._quota_exhausted_until:
+                return self._unavailable(prompt, allow_heuristic, "Cuota de Gemini agotada (pausa de 5 minutos en curso).")
 
             models_to_try: list[str] = [self.settings.gemini_model]
             fallback_models = getattr(self.settings, "gemini_fallback_models", [])
@@ -60,27 +95,21 @@ class LLMClient:
                         max_tokens=max_tokens,
                     )
                 except GeminiQuotaExceededError as e:
-                    logger.warning(
-                        f"Cuota diaria/por minuto de Gemini agotada en '{model_name}': {e}. "
-                        "Activando cooldown de 5 minutos y fallback heurístico inmediato..."
-                    )
-                    self._quota_exhausted_until = time.time() + 300.0
-                    return self._heuristic_fallback(prompt)
+                    logger.warning(f"Cuota diaria/por minuto de Gemini agotada en '{model_name}': {e}. Pausa de 5 minutos.")
+                    self._start_quota_cooldown()
+                    return self._unavailable(prompt, allow_heuristic, "Cuota de Gemini agotada.")
                 except Exception as e:
                     err_msg = str(e)
                     if "429" in err_msg or "RESOURCE_EXHAUSTED" in err_msg or "QuotaFailure" in err_msg:
-                        logger.warning(
-                            f"Detectado límite de cuota en Gemini '{model_name}': {err_msg[:200]}. "
-                            "Activando cooldown y fallback heurístico inmediato..."
-                        )
-                        self._quota_exhausted_until = time.time() + 300.0
-                        return self._heuristic_fallback(prompt)
+                        logger.warning(f"Detectado límite de cuota en Gemini '{model_name}': {err_msg[:200]}. Pausa de 5 minutos.")
+                        self._start_quota_cooldown()
+                        return self._unavailable(prompt, allow_heuristic, "Cuota de Gemini agotada.")
                     logger.warning(f"Falla con modelo Gemini '{model_name}': {e}. Probando siguiente modelo de la cascada...")
 
-            logger.error("Todos los modelos de Gemini fallaron o experimentan alta demanda. Activando evaluador heurístico inteligente...")
+            logger.error("Todos los modelos de Gemini fallaron o experimentan alta demanda.")
+            return self._unavailable(prompt, allow_heuristic, "Todos los modelos de Gemini fallaron.")
 
-        # Si aún no tiene API keys configuradas o fallaron los proveedores externos, usamos un análisis heurístico inteligente como fallback
-        return self._heuristic_fallback(prompt)
+        return self._unavailable(prompt, allow_heuristic, "No hay GEMINI_API_KEY ni ANTHROPIC_API_KEY configuradas.")
 
     async def _call_gemini(
         self,
@@ -297,21 +326,13 @@ class LLMClient:
         else:
             cons.append("Validar procesos específicos de CI/CD e integraciones internas del equipo")
 
-        matched_str = ", ".join(matched_skills[:4]) if matched_skills else "desarrollo Full Stack y APIs REST"
+        matched_str = ", ".join(matched_skills[:4]) if matched_skills else "ninguna tecnología del stack principal"
+        missing_str = ", ".join(missing_skills[:4]) if missing_skills else "ninguna"
         summary = (
-            f"La vacante para el puesto de {title} en {company} presenta un nivel de compatibilidad del {score}% con el perfil de Mateo. "
-            f"El rol requiere competencias en {matched_str}, áreas donde Mateo cuenta con experiencia sólida construyendo software de extremo a extremo. "
-            f"Su experiencia en producción con Express 5, PostgreSQL 17, TypeScript y frontend reactivo en Vue 3 y React "
-            f"le permite integrarse con rapidez y autonomía operativa. "
-            f"Proyectos en vivo como Portafolio (mateogs.tech) y Ynara validan directamente la calidad y solidez técnica requerida."
+            f"Estimación heurística sin IA (Gemini no disponible): puntaje aproximado por palabras clave, no un análisis. "
+            f"Coincidencias detectadas: {matched_str}. Tecnologías fuera del stack mencionadas: {missing_str}. "
+            f"Revisá la vacante a mano o volvé a evaluarla cuando la IA esté disponible."
         )
-
-        recruiter_note = (
-            f"Hola, vi la búsqueda de {title} en {company}. Me especializo en Vue/Nuxt, Node y TypeScript con proyectos en producción (mateogs.tech). "
-            f"Me gustaría conectar y conversar sobre cómo aportar al equipo."
-        )
-        if len(recruiter_note) > 280:
-            recruiter_note = recruiter_note[:277] + "..."
 
         result = {
             "score": score,
@@ -321,60 +342,13 @@ class LLMClient:
             "cons": cons,
             "missing_skills": missing_skills[:4],
             "matching_projects": matching_projects[:3],
-            "salary_estimate": salary or "No especificado en la vacante",
+            "salary_estimate": salary,
             "hiring_manager_name": None,
             "hiring_manager_title": None,
-            "recruiter_note": recruiter_note,
+            "recruiter_note": None,
             "scored_by": "heuristic",
         }
         return json.dumps(result, ensure_ascii=False)
-
-    def _heuristic_fallback(self, prompt: str) -> str:
-        """Fallback cuando la API externa no está disponible o tiene spike de demanda."""
-        if "PROPUESTA" in prompt or "elevator_pitch" in prompt:
-            return json.dumps({
-                "subject_or_hook": "Frontend & Full-stack Developer — Mateo Sonzogni",
-                "elevator_pitch": (
-                    "Hola! Me pongo en contacto porque mi perfil en desarrollo frontend y full stack "
-                    "(Vue 3, Nuxt, TypeScript y arquitectura en Node/PostgreSQL) se alinea directamente con los desafíos de la posición. "
-                    "Pueden ver mis proyectos en producción, arquitectura y métricas en vivo en mi portafolio: https://mateogs.tech\n\n"
-                    "Quedo a disposición para conversar sobre cómo aportar al equipo."
-                ),
-                "cover_letter": "Disponible a solicitud.",
-                "suggested_projects": ["Portafolio (mateogs.tech)", "La Rúcula", "Ynara"]
-            })
-
-        # Si se esperaba JSON de contenido técnico:
-        if "carousel_slides" in prompt or "linkedin_post" in prompt:
-            return json.dumps({
-                "title": "Optimización y Arquitectura Frontend en Producción",
-                "hook": "En producción, la teoría choca con la realidad del usuario. Así optimizamos el critical rendering path.",
-                "linkedin_post": "En producción, la teoría choca con la realidad.\n\n• Reducción de cascada de red.\n• Estrategias de SSR y prefetching.\n• Métricas comprobadas en Lighthouse.\n\n#webdev #frontend #vuejs #architecture",
-                "first_comment": "Detalles técnicos completos en https://mateogs.tech",
-                "twitter_thread": [
-                    "1/3 Optimización frontend en producción: lecciones aprendidas.",
-                    "2/3 El cuello de botella principal fue la cascada de recursos bloqueantes.",
-                    "3/3 Con prefetching y compresión Brotli bajamos latencia un 60%."
-                ],
-                "devto_article": {
-                    "title": "Optimización y Arquitectura Frontend en Producción",
-                    "tags": ["webdev", "architecture", "vue", "performance"],
-                    "markdown_body": "# Lecciones de producción\n\nDetalles de arquitectura e implementación."
-                },
-                "carousel_slides": [
-                    {"index": 1, "title": "Arquitectura Frontend", "subtitle": "Lecciones en producción", "bullets": ["Latencia reducida", "Cero layout shifts"], "metric_badge": "99/100", "code_snippet": None, "footer": "mateogs.tech"},
-                    {"index": 2, "title": "El Problema", "subtitle": "Cascada de bloqueo", "bullets": ["Render blocking scripts"], "metric_badge": None, "code_snippet": None, "footer": "Producción"},
-                    {"index": 3, "title": "La Solución", "subtitle": "Hydration diferida", "bullets": ["Lazy load selectivo"], "metric_badge": None, "code_snippet": "defineAsyncComponent(() => import('./Widget.vue'))", "footer": "Código"},
-                    {"index": 4, "title": "Métricas", "subtitle": "Benchmarks", "bullets": ["-60% TTFB", "+35 puntos Lighthouse"], "metric_badge": "-60% TTFB", "code_snippet": None, "footer": "Resultados"},
-                    {"index": 5, "title": "Conclusión", "subtitle": "Accionable", "bullets": ["Mide antes de optimizar", "Prioriza el critical path"], "metric_badge": "mateogs.tech", "code_snippet": None, "footer": "Mateo Sonzogni"}
-                ]
-            })
-
-        # Si se esperaba evaluación de vacante / matching laboral:
-        if "EVALUÁ ESTA OFERTA LABORAL" in prompt or "score" in prompt or "verdict" in prompt or "JSON" in prompt:
-            return self._heuristic_evaluate_job(prompt)
-
-        return "Hola! Soy Eros Agent. He evaluado la posición. Cumple con el stack de desarrollo frontend y arquitectura web."
 
     async def embed_text(self, text: str) -> list[float]:
         """Genera un vector embedding de 3072 dimensiones con Gemini."""
