@@ -1030,7 +1030,9 @@ HTML_DASHBOARD = r"""<!DOCTYPE html>
             if (action === 'evaluate') res = await fetch('/api/evaluate', { method: 'POST', headers: authHeaders() })
             if (action === 'purge') res = await fetch('/api/purge', { method: 'POST', headers: authHeaders() })
             if (action === 'sync') res = await fetch('/api/profile/sync', { method: 'POST', headers: authHeaders() })
-            if (res && res.ok) {
+            if (res && res.status === 202) {
+              showToast(action === 'scan' ? 'Escaneo iniciado en segundo plano' : 'Evaluación iniciada en segundo plano')
+            } else if (res && res.ok) {
               showToast(`Acción completada con éxito`)
               loadData()
             } else {
