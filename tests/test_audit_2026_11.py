@@ -189,6 +189,26 @@ class TestIdempotentDispatch(_TempDbCase):
         self.assertFalse(preview["contact_email_verified"])
         self.assertTrue(preview["requires_manual_email"])
 
+        # Escribir la misma dirección a mano (to_email) la vuelve manual y se puede enviar
+        ok = MagicMock(status_code=200, text="OK")
+        with patch("httpx.AsyncClient.post", new_callable=AsyncMock, return_value=ok):
+            res = await self.dispatcher.dispatch_application(
+                job_id="job-legacy-email", to_email="peter@acme.io", confirmed=True
+            )
+        self.assertTrue(res["ok"], res)
+        self.assertEqual(res["contact_email_source"], "manual")
+        self.assertEqual((await self.storage.get_job("job-legacy-email")).contact_email_source, "manual")
+
+    async def test_applied_status_is_never_overwritten(self):
+        applied = qualified_job("job-applied-keep", status=JobStatus.APPLIED, applied_at="2026-10-01T00:00:00+00:00")
+        await self.storage.save_job(applied)
+        stale = await self.storage.get_job("job-applied-keep")
+        stale.status = JobStatus.DISCARDED
+        await self.storage.save_job(stale)
+        self.assertEqual((await self.storage.get_job("job-applied-keep")).status, JobStatus.APPLIED)
+        await self.storage.delete_all_discarded_jobs()
+        self.assertIsNotNone(await self.storage.get_job("job-applied-keep"))
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # E1 + dedup: el escaneo no borra historial ni duplica
@@ -229,10 +249,21 @@ class TestScanKeepsHistory(_TempDbCase):
         await self.storage.save_job(job)
         await self.storage.delete_job("job-deleted")
 
-        self.engine.sources = [FakeSource("remotive", [job])]
+        same_elsewhere = qualified_job("job-deleted-other-source", source="weworkremotely")
+        self.engine.sources = [FakeSource("remotive", [job]), FakeSource("weworkremotely", [same_elsewhere])]
         res = await self.engine.run_scan()
         self.assertEqual(res["new_jobs"], 0)
         self.assertIsNone(await self.storage.get_job("job-deleted"))
+
+        # Pasado el plazo, la misma empresa + título desde otra fuente es una búsqueda nueva
+        import aiosqlite
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("UPDATE seen_jobs SET created_at = '2025-01-01T00:00:00+00:00'")
+            await db.commit()
+        res = await self.engine.run_scan()
+        self.assertEqual(res["new_jobs"], 1)
+        self.assertIsNone(await self.storage.get_job("job-deleted"), "el mismo id sigue sin volver")
+        self.assertIsNotNone(await self.storage.get_job("job-deleted-other-source"))
 
         # "Borrar todas" conserva lo postulado
         await self.storage.save_job(qualified_job("job-a", company="A1"))
@@ -252,10 +283,17 @@ class TestScanKeepsHistory(_TempDbCase):
         saved = [await self.storage.get_job("job-src-a"), await self.storage.get_job("job-src-b")]
         self.assertEqual(sum(1 for j in saved if j is not None), 1)
 
-        # Dos "Empresa Confidencial" de fuentes distintas no se fusionan
+        # Los genéricos ("Empresa Confidencial", "Empresa Remota") no se deduplican por clave:
+        # dos avisos distintos con el mismo título se guardan los dos
+        self.assertIsNone(job_dedup_key("Empresa Confidencial (Neuquén)", "Full Stack Developer", "computrabajo"))
+        self.assertIsNone(job_dedup_key("Empresa Remota", "Full Stack Developer", "remoteok"))
         c1 = qualified_job("job-conf-1", source="computrabajo", company="Empresa Confidencial")
-        c2 = qualified_job("job-conf-2", source="linkedin", company="Empresa Confidencial")
-        self.assertNotEqual(job_dedup_key(c1.company, c1.title, c1.source), job_dedup_key(c2.company, c2.title, c2.source))
+        c2 = qualified_job("job-conf-2", source="computrabajo", company="Empresa Confidencial")
+        r1 = qualified_job("job-rem-1", source="remoteok", company="Empresa Remota")
+        r2 = qualified_job("job-rem-2", source="remotive", company="Empresa Remota")
+        self.engine.sources = [FakeSource("computrabajo", [c1, c2]), FakeSource("remoteok", [r1]), FakeSource("remotive", [r2])]
+        res = await self.engine.run_scan()
+        self.assertEqual(res["new_jobs"], 4)
 
     async def test_scan_extracts_posting_email_with_source(self):
         job = qualified_job("job-mail")
@@ -418,12 +456,41 @@ class TestContentPublishing(unittest.IsolatedAsyncioTestCase):
             res_x = await self.dispatcher.publish_post("post-1", channel="twitter")
         self.assertTrue(res_x["ok"])
 
-        # El callback de n8n la marca publicada; ahí ya no se republica
-        await self.storage.update_status("post-1", ContentPostStatus.PUBLISHED, n8n_response="{}")
+        # n8n confirma canal por canal: PUBLISHED recién cuando están los dos
+        status = await self.storage.confirm_published("post-1", ["linkedin"])
+        self.assertEqual(status, ContentPostStatus.APPROVED)
+        status = await self.storage.confirm_published("post-1", ["twitter"])
+        self.assertEqual(status, ContentPostStatus.PUBLISHED)
+
+        # Un canal publicado no se republica (ni con force); Dev.to no tiene publicación automática
         with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as post3:
-            res = await self.dispatcher.publish_post("post-1", channel="devto")
+            res = await self.dispatcher.publish_post("post-1", channel="linkedin", force=True)
+            res_all = await self.dispatcher.publish_post("post-1", channel="all")
+            res_devto = await self.dispatcher.publish_post("post-1", channel="devto")
             post3.assert_not_called()
         self.assertEqual(res["error_code"], "already_published")
+        self.assertEqual(res_all["error_code"], "already_published")
+        self.assertEqual(res_devto["error_code"], "invalid_channel")
+
+    async def test_failed_channel_callback_keeps_other_channel_and_allows_retry(self):
+        ok = MagicMock(status_code=200, text="queued")
+        with patch("httpx.AsyncClient.post", new_callable=AsyncMock, return_value=ok):
+            res = await self.dispatcher.publish_post("post-1", channel="all")
+        self.assertEqual(res["dispatched_channels"], ["linkedin", "twitter"])
+
+        await self.storage.confirm_published("post-1", ["linkedin"])
+        await self.storage.release_dispatch("post-1", ["twitter"])
+        saved = await self.storage.get_post("post-1")
+        self.assertEqual(saved.status, ContentPostStatus.APPROVED)
+        self.assertEqual(saved.published_channels, ["linkedin"])
+        self.assertEqual(saved.dispatched_channels, ["linkedin"])
+
+        with patch("httpx.AsyncClient.post", new_callable=AsyncMock, return_value=ok) as retry:
+            res = await self.dispatcher.publish_post("post-1", channel="twitter")
+            retry.assert_called_once()
+        self.assertTrue(res["ok"])
+        status = await self.storage.confirm_published("post-1", ["twitter"])
+        self.assertEqual(status, ContentPostStatus.PUBLISHED)
 
     async def test_failed_dispatch_releases_channel(self):
         bad = MagicMock(status_code=500, text="boom")

@@ -865,22 +865,31 @@ async def get_carousel_html(post_id: str, auto_print: bool = False):
 async def n8n_callback(payload: dict[str, Any]):
     """Webhook receptor de confirmación desde n8n cuando se ejecuta un workflow."""
     """
-    status="published" → PUBLISHED; "rejected" → REJECTED; "failed"/"error" → libera los
-    canales despachados para poder reintentar (la publicación queda APPROVED).
+    Body: {post_id, status, channel?}.
+    - status="published": confirma ese canal (sin channel o "all": todos los despachados);
+      la publicación queda PUBLISHED cuando todos los canales despachados están confirmados.
+    - status="rejected" → REJECTED.
+    - status="failed"/"error": libera el canal para poder reintentar.
+    - Sin status (o desconocido): se ignora.
     """
     logger.info(f"Callback recibido desde n8n: post_id={payload.get('post_id')} status={payload.get('status')} channel={payload.get('channel')}")
     post_id = payload.get("post_id")
-    status_str = str(payload.get("status", "published")).lower()
+    status_str = str(payload.get("status") or "").lower()
+    channel = str(payload.get("channel") or "all").lower()
+    channels = None if channel == "all" else [channel]
+    new_status = None
     if post_id:
         details = json.dumps(payload.get("details", payload))
         if status_str == "published":
-            await content_storage.update_status(post_id, ContentPostStatus.PUBLISHED, n8n_response=details)
+            new_status = await content_storage.confirm_published(post_id, channels, n8n_response=details)
         elif status_str == "rejected":
             await content_storage.update_status(post_id, ContentPostStatus.REJECTED, n8n_response=details)
+            new_status = ContentPostStatus.REJECTED
+        elif status_str in ("failed", "error"):
+            await content_storage.release_dispatch(post_id, channels or content_dispatcher.channels_for("all"), n8n_response=details)
         else:
-            channel = str(payload.get("channel") or "all").lower()
-            await content_storage.release_dispatch(post_id, content_dispatcher.channels_for(channel), n8n_response=details)
-    return {"ok": True, "received": True}
+            return {"ok": True, "received": True, "ignored": True}
+    return {"ok": True, "received": True, "status": new_status.value if new_status else None}
 
 
 # ---------------------------------------------------------------------------

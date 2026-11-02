@@ -289,7 +289,8 @@ class JobApplicationDispatcher:
             return _error("invalid_email", f"El correo destinatario '{raw_recipient}' no tiene un formato válido.")
         recipient_email = parsed_addr.lower()
 
-        if explicit and recipient_email != stored.lower():
+        # Una dirección escrita en el pedido (to_email) es manual aunque coincida con la guardada.
+        if explicit:
             recipient_source = EMAIL_SOURCE_MANUAL
         else:
             recipient_source = job.contact_email_source or EMAIL_SOURCE_UNKNOWN
@@ -338,6 +339,7 @@ class JobApplicationDispatcher:
 
         profile = await self._get_profile()
         tailored_cv = await self._load_or_build_cv(job, profile)
+        cv_html_url = cv_public_url(job.id, "html")
         cv_plain_text = self.cv_gen.render_plain_text(tailored_cv)
         pdf_bytes = self.cv_gen.render_pdf(tailored_cv)
         pdf_base64 = base64.b64encode(pdf_bytes).decode("ascii") if pdf_bytes else ""
@@ -364,7 +366,7 @@ class JobApplicationDispatcher:
             if provider == "n8n":
                 outcome, detail = await self._send_via_n8n(job, recipient_email, final_subject, final_body,
                                                            pdf_base64, cv_plain_text, tailored_cv,
-                                                           preview.get("cv_html_url"), idem_key, now_iso)
+                                                           cv_html_url, idem_key, now_iso)
             else:
                 outcome, detail = await self._send_via_smtp(recipient_email, final_subject, final_body, pdf_bytes)
         except Exception as e:  # Cualquier sorpresa después de empezar a enviar: no sabemos si salió
@@ -372,8 +374,16 @@ class JobApplicationDispatcher:
             outcome, detail = "unknown", str(e)
 
         if outcome == "sent":
-            await self.storage.record_application(job.id, recipient_email, recipient_source)
+            warning = None
+            try:
+                await self.storage.record_application(job.id, recipient_email, recipient_source)
+            except Exception as e:
+                # El correo salió: no se responde error. La marca «sending» pasa a «unknown»
+                # sola a los 10 minutos y bloquea reenvíos; queda marcarla a mano como postulada.
+                logger.error(f"Postulación enviada pero no se pudo registrar en la base ({job.id}): {e}")
+                warning = "Se envió, pero no se pudo registrar como postulada. Marcala a mano."
             return {
+                "warning": warning,
                 "ok": True,
                 "job_id": job.id,
                 "dispatched_to": recipient_email,

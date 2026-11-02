@@ -12,11 +12,12 @@ logger = logging.getLogger(__name__)
 class ContentDispatcher:
     """Distribuidor que despacha publicaciones aprobadas al webhook de contenido de n8n.
 
-    - Respeta el canal pedido (all, linkedin, twitter, devto): manda `channel` y solo el
-      texto de los canales pedidos.
-    - No republica lo PUBLISHED ni lo REJECTED, ni vuelve a despachar un canal ya despachado.
-    - No marca PUBLISHED al despachar: eso lo hace el callback de n8n
-      (/api/webhooks/n8n/callback) cuando efectivamente publicó.
+    - Respeta el canal pedido (all, linkedin, twitter): manda `channel` y solo el texto
+      de los canales pedidos. Dev.to no tiene publicación automática y se rechaza.
+    - No republica un canal ya publicado ni lo REJECTED, ni vuelve a despachar un canal
+      que espera confirmación.
+    - No marca PUBLISHED al despachar: el callback de n8n confirma cada canal y la
+      publicación queda PUBLISHED cuando todos los despachados están confirmados.
     - Manda N8N_WEBHOOK_SECRET en el header X-N8N-Secret.
     """
 
@@ -26,7 +27,7 @@ class ContentDispatcher:
 
     @staticmethod
     def channels_for(channel: str) -> list[str]:
-        return ["linkedin", "twitter", "devto"] if channel == "all" else [channel]
+        return ["linkedin", "twitter"] if channel == "all" else [channel]
 
     async def publish_post(self, post_id: str, channel: str = "all", force: bool = False) -> dict[str, Any]:
         """Despacha la publicación a n8n por el canal pedido (o la aprueba localmente sin n8n).
@@ -35,6 +36,9 @@ class ContentDispatcher:
         already_dispatched, dispatch_failed, dispatch_unknown.
         """
         channel = (channel or "all").strip().lower()
+        if channel == "devto":
+            return {"ok": False, "error_code": "invalid_channel",
+                    "error": "Dev.to no tiene publicación automática: copiá el artículo desde la publicación."}
         if channel not in PUBLISH_CHANNELS:
             return {"ok": False, "error_code": "invalid_channel",
                     "error": f"Canal inválido: '{channel}'. Opciones: {', '.join(PUBLISH_CHANNELS)}."}
@@ -42,13 +46,16 @@ class ContentDispatcher:
         post = await self.storage.get_post(post_id)
         if not post:
             return {"ok": False, "error_code": "not_found", "error": f"Publicación {post_id} no encontrada"}
-        if post.status == ContentPostStatus.PUBLISHED:
-            return {"ok": False, "error_code": "already_published", "error": "La publicación ya fue publicada; no se republica."}
+        if any(c in post.published_channels for c in self.channels_for(channel)):
+            return {"ok": False, "error_code": "already_published",
+                    "error": f"Ya se publicó en {', '.join(post.published_channels)}; no se republica."}
         if post.status == ContentPostStatus.REJECTED:
             return {"ok": False, "error_code": "rejected", "error": "La publicación fue rechazada; no se publica."}
 
         webhook_url = self.settings.n8n_webhook_url.strip()
         if not webhook_url:
+            if post.status == ContentPostStatus.PUBLISHED:
+                return {"ok": False, "error_code": "already_published", "error": "La publicación ya fue publicada; no se republica."}
             logger.info(f"N8N_WEBHOOK_URL no configurado. Marcando publicación {post_id} como APROBADA (modo local).")
             await self.storage.update_status(post_id, ContentPostStatus.APPROVED, n8n_response="Local approval: No N8N webhook configured")
             return {
@@ -64,7 +71,7 @@ class ContentDispatcher:
         if claim != "claimed":
             errors = {
                 "missing": ("not_found", f"Publicación {post_id} no encontrada"),
-                "published": ("already_published", "La publicación ya fue publicada; no se republica."),
+                "published": ("already_published", f"Ya se publicó en {', '.join(dispatched)}; no se republica."),
                 "rejected": ("rejected", "La publicación fue rechazada; no se publica."),
                 "already_dispatched": (
                     "already_dispatched",
@@ -94,11 +101,7 @@ class ContentDispatcher:
             "linkedin_post": linkedin_text,
             "first_comment": post.first_comment if "linkedin" in include else "",
             "twitter_thread": post.twitter_thread if "twitter" in include else [],
-            "devto_article": {
-                "title": post.devto.title,
-                "tags": post.devto.tags,
-                "markdown_body": post.devto.markdown_body,
-            } if "devto" in include else None,
+            "devto_article": None,
             "carousel_url": f"{base_url}/api/content/carousel/{post.id}/html",
             "carousel_print_url": f"{base_url}/api/content/carousel/{post.id}/html?auto_print=1",
             "slides_count": len(post.carousel_slides),

@@ -11,8 +11,9 @@ class ContentPostStatus(str, Enum):
     REJECTED = "rejected"
 
 
-# Canales a los que se puede despachar una publicación vía n8n
-PUBLISH_CHANNELS = ("all", "linkedin", "twitter", "devto")
+# Canales que el workflow de n8n publica. Dev.to no tiene publicación automática todavía:
+# se rechaza en vez de responder "despachado" y que nunca salga.
+PUBLISH_CHANNELS = ("all", "linkedin", "twitter")
 
 
 class ContentPillar(str, Enum):
@@ -57,6 +58,8 @@ class ContentPost(BaseModel):
     # Canales ya despachados a n8n (esperando o con confirmación) y cuándo se despachó
     dispatched_channels: list[str] = Field(default_factory=list)
     dispatched_at: str | None = None
+    # Canales que n8n confirmó como publicados (callback)
+    published_channels: list[str] = Field(default_factory=list)
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     updated_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 

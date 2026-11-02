@@ -11,6 +11,9 @@ logger = logging.getLogger(__name__)
 
 # Un envío marcado "sending" más viejo que esto se considera cortado (no sabemos si salió).
 STALE_SEND_MINUTES = 10
+# Una vacante borrada bloquea avisos de la misma empresa + título de otras fuentes por este
+# tiempo; pasado ese plazo, un aviso nuevo igual se considera una búsqueda nueva.
+SEEN_DEDUP_DAYS = 60
 
 _JOB_COLUMNS = (
     "id, source, external_id, title, company, url, description, "
@@ -226,7 +229,10 @@ class JobStorage:
             else:
                 await db.execute("""
                     UPDATE jobs SET
-                        status = CASE WHEN jobs.status != 'new' AND ? = 'new' THEN jobs.status ELSE ? END,
+                        status = CASE
+                            WHEN jobs.status = 'applied' OR jobs.applied_at IS NOT NULL THEN jobs.status
+                            WHEN jobs.status != 'new' AND ? = 'new' THEN jobs.status
+                            ELSE ? END,
                         match_score = COALESCE(?, match_score),
                         match_analysis = COALESCE(?, match_analysis),
                         pitch_draft = COALESCE(?, pitch_draft),
@@ -278,15 +284,18 @@ class JobStorage:
                 exists = await cursor.fetchone() is not None
 
             if not exists:
+                seen_cutoff = (datetime.now(timezone.utc) - timedelta(days=SEEN_DEDUP_DAYS)).isoformat()
                 async with db.execute(
-                    "SELECT 1 FROM seen_jobs WHERE id = ? OR dedup_key = ? LIMIT 1", (job.id, dedup_key)
+                    "SELECT 1 FROM seen_jobs WHERE id = ? OR (dedup_key = ? AND created_at >= ?) LIMIT 1",
+                    (job.id, dedup_key, seen_cutoff),
                 ) as cursor:
                     if await cursor.fetchone():
                         return False
-                async with db.execute("SELECT 1 FROM jobs WHERE dedup_key = ? LIMIT 1", (dedup_key,)) as cursor:
-                    if await cursor.fetchone():
-                        logger.debug(f"Vacante duplicada entre fuentes omitida: '{job.title}' en {job.company} ({job.source})")
-                        return False
+                if dedup_key:
+                    async with db.execute("SELECT 1 FROM jobs WHERE dedup_key = ? LIMIT 1", (dedup_key,)) as cursor:
+                        if await cursor.fetchone():
+                            logger.debug(f"Vacante duplicada entre fuentes omitida: '{job.title}' en {job.company} ({job.source})")
+                            return False
                 await db.execute(_INSERT_JOB_SQL, self._insert_params(job))
             else:
                 await db.execute("""
@@ -299,6 +308,7 @@ class JobStorage:
                         salary = COALESCE(?, salary),
                         country = COALESCE(?, country),
                         is_remote = ?,
+                        dedup_key = ?,
                         contact_email_source = CASE
                             WHEN contact_email IS NULL AND ? IS NOT NULL THEN ?
                             ELSE contact_email_source END,
@@ -313,6 +323,7 @@ class JobStorage:
                     job.salary,
                     job.country,
                     1 if job.is_remote else 0,
+                    dedup_key,
                     job.contact_email, job.contact_email_source or "posting",
                     job.contact_email,
                     job.id
@@ -515,7 +526,9 @@ class JobStorage:
         """, (reason, now_iso, *params))
 
     async def delete_job(self, job_id: str) -> None:
-        """Elimina una vacante y recuerda su id para que el escaneo no la traiga de vuelta."""
+        """Elimina una vacante y recuerda su id para que el escaneo no la traiga de vuelta.
+
+        Es un borrado explícito pedido por Mateo (incluso de una postulada)."""
         async with aiosqlite.connect(self.db_path) as db:
             await self._remember_deleted(db, "id = ?", (job_id,), "deleted")
             await db.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
@@ -537,8 +550,9 @@ class JobStorage:
     async def delete_all_discarded_jobs(self) -> int:
         """Elimina las vacantes descartadas recordando sus ids para que no vuelvan como nuevas."""
         async with aiosqlite.connect(self.db_path) as db:
-            await self._remember_deleted(db, "status = ?", (JobStatus.DISCARDED.value,), "deleted")
-            cursor = await db.execute("DELETE FROM jobs WHERE status = ?", (JobStatus.DISCARDED.value,))
+            where = "status = ? AND applied_at IS NULL"
+            await self._remember_deleted(db, where, (JobStatus.DISCARDED.value,), "deleted")
+            cursor = await db.execute(f"DELETE FROM jobs WHERE {where}", (JobStatus.DISCARDED.value,))
             await db.commit()
             return cursor.rowcount
 

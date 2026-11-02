@@ -31,6 +31,8 @@ PLACEHOLDER_COMPANY_NAMES = {
     "nd",
     "unknown",
     "desconocida",
+    "empresaremota",
+    "remotecompany",
 }
 
 _PLACEHOLDER_WORDS = ("confidencial", "confidential", "stealth", "undisclosed")
@@ -79,14 +81,17 @@ def normalize_title(title: str | None) -> str:
     return re.sub(r"[^a-z0-9]", "", cleaned)
 
 
-def job_dedup_key(company: str | None, title: str | None, source: str | None = None) -> str:
+def job_dedup_key(company: str | None, title: str | None, source: str | None = None) -> str | None:
     """Clave para detectar la misma vacante publicada en varias fuentes.
 
-    Empresa + título normalizados. Si la empresa es un genérico, la clave incluye
-    la fuente para no fusionar avisos distintos de empresas que no se identifican.
+    Empresa + título normalizados. Si la empresa es un genérico ("Empresa Confidencial",
+    "Empresa Remota") devuelve None: esos avisos solo se deduplican por id, porque
+    no hay forma de saber si dos de ellos son la misma empresa.
     """
+    if is_placeholder_company(company):
+        return None
     company_key = normalize_company(company)
     title_key = normalize_title(title)
-    if is_placeholder_company(company):
-        return f"{source or 'unknown'}:{company_key}|{title_key}"
+    if not company_key or not title_key:
+        return None
     return f"{company_key}|{title_key}"
