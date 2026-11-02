@@ -27,5 +27,9 @@ VOLUME ["/app/data"]
 # Puerto expuesto para comunicación interna con el admin panel
 EXPOSE 8000
 
+# /health responde 503 si la base SQLite no responde
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD curl -fsS http://127.0.0.1:8000/health || exit 1
+
 # Comando de arranque por defecto: servidor FastAPI
 CMD ["uvicorn", "eros.api:app", "--host", "0.0.0.0", "--port", "8000"]
