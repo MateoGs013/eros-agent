@@ -48,6 +48,11 @@ class ContentStorage:
                     updated_at TEXT NOT NULL
                 )
             """)
+            for col in ("dispatched_channels TEXT", "dispatched_at TEXT"):
+                try:
+                    await db.execute(f"ALTER TABLE content_posts ADD COLUMN {col}")
+                except Exception:
+                    pass
             await db.execute("CREATE INDEX IF NOT EXISTS idx_content_status ON content_posts(status)")
             await db.execute("CREATE INDEX IF NOT EXISTS idx_content_created ON content_posts(created_at)")
             await db.commit()
@@ -150,6 +155,72 @@ class ContentStorage:
             await db.commit()
             return True
 
+    async def claim_dispatch(self, post_id: str, channels: list[str], force: bool = False) -> tuple[str, list[str]]:
+        """Reserva de forma atómica los canales a despachar de una publicación.
+
+        Devuelve ("claimed", canales) o un motivo de rechazo: ("missing", []),
+        ("published", []), ("rejected", []) o ("already_dispatched", canales_ya_despachados).
+        """
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("BEGIN IMMEDIATE")
+            async with db.execute(
+                "SELECT status, dispatched_channels FROM content_posts WHERE id = ?", (post_id,)
+            ) as cursor:
+                row = await cursor.fetchone()
+            if not row:
+                await db.rollback()
+                return "missing", []
+            status, raw_channels = row
+            if status in (ContentPostStatus.PUBLISHED.value, ContentPostStatus.REJECTED.value):
+                await db.rollback()
+                return status, []
+            already = self._load_channels(raw_channels)
+            overlap = [c for c in channels if c in already]
+            if overlap and not force:
+                await db.rollback()
+                return "already_dispatched", already
+            merged = sorted(set(already) | set(channels))
+            now_iso = datetime.now(timezone.utc).isoformat()
+            await db.execute("""
+                UPDATE content_posts SET status = ?, dispatched_channels = ?, dispatched_at = ?, updated_at = ?
+                WHERE id = ?
+            """, (ContentPostStatus.APPROVED.value, json.dumps(merged), now_iso, now_iso, post_id))
+            await db.commit()
+            return "claimed", merged
+
+    async def release_dispatch(self, post_id: str, channels: list[str], n8n_response: str | None = None) -> None:
+        """Libera canales reservados cuando n8n no recibió la publicación."""
+        async with aiosqlite.connect(self.db_path) as db:
+            async with db.execute("SELECT dispatched_channels FROM content_posts WHERE id = ?", (post_id,)) as cursor:
+                row = await cursor.fetchone()
+            if not row:
+                return
+            remaining = [c for c in self._load_channels(row[0]) if c not in channels]
+            now_iso = datetime.now(timezone.utc).isoformat()
+            await db.execute("""
+                UPDATE content_posts SET dispatched_channels = ?,
+                    dispatched_at = CASE WHEN ? = '[]' THEN NULL ELSE dispatched_at END,
+                    n8n_response = COALESCE(?, n8n_response), updated_at = ?
+                WHERE id = ?
+            """, (json.dumps(remaining), json.dumps(remaining), n8n_response, now_iso, post_id))
+            await db.commit()
+
+    async def set_n8n_response(self, post_id: str, n8n_response: str) -> None:
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                "UPDATE content_posts SET n8n_response = ?, updated_at = ? WHERE id = ?",
+                (n8n_response, datetime.now(timezone.utc).isoformat(), post_id),
+            )
+            await db.commit()
+
+    @staticmethod
+    def _load_channels(raw: str | None) -> list[str]:
+        try:
+            value = json.loads(raw) if raw else []
+            return [str(c) for c in value] if isinstance(value, list) else []
+        except Exception:
+            return []
+
     async def delete_post(self, post_id: str) -> bool:
         """Elimina una publicación."""
         async with aiosqlite.connect(self.db_path) as db:
@@ -196,6 +267,8 @@ class ContentStorage:
             status=ContentPostStatus(row["status"]),
             n8n_published_at=row["n8n_published_at"],
             n8n_response=row["n8n_response"],
+            dispatched_channels=self._load_channels(row["dispatched_channels"]) if "dispatched_channels" in row.keys() else [],
+            dispatched_at=row["dispatched_at"] if "dispatched_at" in row.keys() else None,
             created_at=row["created_at"],
             updated_at=row["updated_at"],
         )

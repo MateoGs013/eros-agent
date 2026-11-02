@@ -11,6 +11,10 @@ class ContentPostStatus(str, Enum):
     REJECTED = "rejected"
 
 
+# Canales a los que se puede despachar una publicación vía n8n
+PUBLISH_CHANNELS = ("all", "linkedin", "twitter", "devto")
+
+
 class ContentPillar(str, Enum):
     ARCHITECTURE = "architecture"
     PRODUCTION_LESSONS = "production_lessons"
@@ -50,6 +54,9 @@ class ContentPost(BaseModel):
     status: ContentPostStatus = ContentPostStatus.DRAFT
     n8n_published_at: str | None = None
     n8n_response: str | None = None
+    # Canales ya despachados a n8n (esperando o con confirmación) y cuándo se despachó
+    dispatched_channels: list[str] = Field(default_factory=list)
+    dispatched_at: str | None = None
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     updated_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
@@ -59,6 +66,11 @@ class ContentGenerateRequest(BaseModel):
     pillar: ContentPillar | None = None
     project_slug: str | None = None
     custom_instructions: str | None = None
+    key_points: list[str] = Field(default_factory=list)
+
+
+class ContentPublishRequest(BaseModel):
+    channel: str = "all"
 
 
 class ContentStatusUpdateRequest(BaseModel):
