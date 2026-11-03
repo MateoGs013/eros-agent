@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class JobStatus(str, Enum):
@@ -130,7 +130,14 @@ class ProjectSummary(BaseModel):
 
 
 class ProfileContext(BaseModel):
-    """Contexto dinámico de Mateo obtenido desde su portafolio."""
+    """Contexto dinámico de Mateo obtenido desde su portafolio.
+
+    Valida también al asignar: el documento «about» del portafolio publica algunos
+    campos como lista (por ejemplo `languages`), y un valor sin validar guardado en
+    la caché hacía fallar el arranque al volver a leerla.
+    """
+    model_config = ConfigDict(validate_assignment=True)
+
     name: str = "Mateo Gabriel Sonzogni"
     role: str = "Desarrollador Frontend & Full Stack · Creative Developer"
     location: str = "Río Negro, Patagonia Argentina"
@@ -142,3 +149,16 @@ class ProfileContext(BaseModel):
     projects: list[ProjectSummary] = Field(default_factory=list)
     tech_stack: list[str] = Field(default_factory=list)
     updated_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+    @field_validator(
+        "name", "role", "location", "timezone", "languages", "education",
+        "core_competencies", "engineering_philosophy", mode="before",
+    )
+    @classmethod
+    def join_text_lists(cls, value: Any) -> Any:
+        """Una lista de textos (como `languages` del portafolio) se une con « · »; null es vacío."""
+        if value is None:
+            return ""
+        if isinstance(value, list):
+            return " · ".join(str(item).strip() for item in value if str(item).strip())
+        return value

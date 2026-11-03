@@ -3,6 +3,7 @@ import json
 import logging
 from typing import Any
 import aiosqlite
+from pydantic import ValidationError
 from eros.config import get_settings
 from eros.hunter.normalize import job_dedup_key
 from eros.models import JobOffer, JobStatus, ProfileContext
@@ -576,13 +577,21 @@ class JobStorage:
             await db.commit()
 
     async def get_profile_cache(self) -> ProfileContext | None:
-        """Obtiene el perfil en caché local si existe."""
+        """Obtiene el perfil en caché local si existe.
+
+        Una caché que ya no se puede leer (guardada por una versión anterior) se trata
+        como vacía: el arranque vuelve a sincronizar el perfil en vez de fallar.
+        """
         async with aiosqlite.connect(self.db_path) as db:
             async with db.execute("SELECT data FROM profile_cache WHERE key = 'main'") as cursor:
                 row = await cursor.fetchone()
-                if row:
+                if not row:
+                    return None
+                try:
                     return ProfileContext.model_validate_json(row[0])
-                return None
+                except ValidationError as e:
+                    logger.warning(f"Perfil en caché ilegible, se vuelve a sincronizar: {e.error_count()} errores.")
+                    return None
 
     async def ping(self) -> bool:
         """Comprueba que la base responde (para el healthcheck)."""
