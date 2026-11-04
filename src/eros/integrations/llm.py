@@ -61,11 +61,13 @@ class LLMClient:
         json_mode: bool = False,
         max_tokens: int = 4096,
         allow_heuristic: bool = False,
+        timeout: float = 45.0,
     ) -> str:
         """Genera una respuesta utilizando el proveedor configurado con cascada de modelos.
 
         allow_heuristic=True solo para evaluar vacantes: sin IA devuelve la estimación
         heurística. Para todo lo demás, sin IA lanza LLMUnavailableError.
+        timeout es por llamada a Gemini (los textos largos necesitan más que los 45 s de siempre).
         """
         if prefer_model == "claude" and self.settings.anthropic_api_key:
             try:
@@ -93,7 +95,11 @@ class LLMClient:
                         temperature=temperature,
                         json_mode=json_mode,
                         max_tokens=max_tokens,
+                        timeout=timeout,
                     )
+                except LLMOutputError:
+                    # Respuesta cortada por largo: otro modelo de la cascada tendría el mismo tope
+                    raise
                 except GeminiQuotaExceededError as e:
                     logger.warning(f"Cuota diaria/por minuto de Gemini agotada en '{model_name}': {e}. Pausa de 5 minutos.")
                     self._start_quota_cooldown()
@@ -119,8 +125,13 @@ class LLMClient:
         temperature: float = 0.3,
         max_tokens: int = 4096,
         json_mode: bool = False,
+        timeout: float = 45.0,
     ) -> str:
-        """Llama a la API de Google Gemini vía REST."""
+        """Llama a la API de Google Gemini vía REST.
+
+        Si Gemini corta la respuesta por llegar a maxOutputTokens, lanza LLMOutputError
+        en vez de devolver un texto (o un JSON) incompleto.
+        """
         active_model = model or getattr(self.settings, "gemini_model", "gemini-3.5-flash")
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{active_model}:generateContent"
         headers = {
@@ -147,7 +158,7 @@ class LLMClient:
                 "parts": [{"text": system_prompt}]
             }
 
-        async with httpx.AsyncClient(timeout=45.0) as client:
+        async with httpx.AsyncClient(timeout=timeout) as client:
             resp = await client.post(url, headers=headers, json=payload)
             if resp.status_code != 200:
                 resp_text = resp.text
@@ -160,6 +171,12 @@ class LLMClient:
             candidates = data.get("candidates", [])
             if not candidates:
                 raise RuntimeError("Gemini no devolvió candidatos.")
+
+            if candidates[0].get("finishReason") == "MAX_TOKENS":
+                raise LLMOutputError(
+                    f"La respuesta de Gemini ({active_model}) se cortó por largo "
+                    f"(llegó al tope de {max_tokens} tokens) y quedó incompleta."
+                )
 
             parts = candidates[0].get("content", {}).get("parts", [])
             text = "".join([p.get("text", "") for p in parts])
