@@ -38,6 +38,7 @@ Sistema multiagente autónomo personal para **búsqueda de empleo tech** (remoto
 - **Human-in-the-Loop:** Nada se publica sin aprobación explícita.
 - **Webhook de n8n:** Al aprobar un borrador (desde Telegram o la API), Eros despacha el payload a `N8N_WEBHOOK_URL` con el `channel` pedido (`all` = LinkedIn + X, `linkedin`, `twitter`) y solo el texto de esos canales. Dev.to no tiene publicación automática (se rechaza con 422). n8n publica y confirma cada canal con `POST /api/webhooks/n8n/callback` (`{post_id, status: "published", channel}`); la publicación queda `published` cuando todos los canales despachados están confirmados.
 - **Seguridad del webhook:** Eros manda `N8N_WEBHOOK_SECRET` en el header `X-N8N-Secret` (contenido y postulaciones). **Los webhooks de n8n tienen que validarlo**: en el nodo Webhook, *Authentication → Header Auth* con una credencial `X-N8N-Secret` = el mismo valor. El workflow de `n8n/` ya lo trae configurado (falta asignarle la credencial). Sin eso, cualquiera que conozca la URL puede publicar en tus redes.
+- **Claves en n8n, sin `$env`:** el workflow no lee variables de entorno (n8n 2.x bloquea `$env` en los nodos por defecto). Usa dos credenciales *Header Auth*: `Eros → n8n` (`X-N8N-Secret` = `N8N_WEBHOOK_SECRET`), para el Webhook y para las confirmaciones a Eros, y `n8n → Eros` (`Authorization` = `Bearer <EROS_API_KEY>`), para los crons que llaman a Eros.
 
 ### 4. 🎯 Autonomous Job Hunter & CV Matcher (`eros.hunter`)
 - **Multi-Fuente:** Get on Board, RemoteOK, Hacker News ("Who is hiring?").

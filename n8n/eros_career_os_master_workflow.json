@@ -104,13 +104,11 @@
       "parameters": {
         "method": "POST",
         "url": "https://eros.mateogs.tech/api/content/generate",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            {
-              "name": "Authorization",
-              "value": "=Bearer {{ $env.EROS_API_KEY }}"
-            },
             {
               "name": "Content-Type",
               "value": "application/json"
@@ -119,7 +117,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"topic\": $json.topic,\n  \"key_points\": $json.key_points,\n  \"project_name\": $json.project_name\n}",
+        "jsonBody": "={\n  \"topic\": {{ JSON.stringify($json.topic) }},\n  \"key_points\": {{ JSON.stringify($json.key_points) }},\n  \"project_name\": {{ JSON.stringify($json.project_name) }}\n}",
         "options": {}
       },
       "id": "eros-generate-content",
@@ -129,7 +127,13 @@
       "position": [
         940,
         -100
-      ]
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "n8n → Eros (Authorization = Bearer EROS_API_KEY)"
+        }
+      }
     },
     {
       "parameters": {
@@ -155,15 +159,8 @@
       "parameters": {
         "method": "POST",
         "url": "https://eros.mateogs.tech/api/scan?evaluate=true",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "Authorization",
-              "value": "=Bearer {{ $env.EROS_API_KEY }}"
-            }
-          ]
-        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
         "options": {}
       },
       "id": "eros-trigger-scan",
@@ -173,7 +170,13 @@
       "position": [
         460,
         100
-      ]
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "n8n → Eros (Authorization = Bearer EROS_API_KEY)"
+        }
+      }
     },
     {
       "parameters": {
@@ -327,15 +330,8 @@
       "parameters": {
         "method": "POST",
         "url": "={{ $('Webhook: /webhook/eros-content').item.json.body.callback_url || 'https://eros.mateogs.tech/api/webhooks/n8n/callback' }}",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "X-N8N-Secret",
-              "value": "={{ $env.N8N_WEBHOOK_SECRET }}"
-            }
-          ]
-        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={\n  \"post_id\": \"{{ $('Webhook: /webhook/eros-content').item.json.body.post_id }}\",\n  \"status\": \"published\",\n  \"channel\": \"linkedin\"\n}",
@@ -348,21 +344,20 @@
       "position": [
         1240,
         220
-      ]
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "Eros → n8n (Header X-N8N-Secret = N8N_WEBHOOK_SECRET)"
+        }
+      }
     },
     {
       "parameters": {
         "method": "POST",
         "url": "={{ $('Webhook: /webhook/eros-content').item.json.body.callback_url || 'https://eros.mateogs.tech/api/webhooks/n8n/callback' }}",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "X-N8N-Secret",
-              "value": "={{ $env.N8N_WEBHOOK_SECRET }}"
-            }
-          ]
-        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={\n  \"post_id\": \"{{ $('Webhook: /webhook/eros-content').item.json.body.post_id }}\",\n  \"status\": \"published\",\n  \"channel\": \"twitter\"\n}",
@@ -375,7 +370,13 @@
       "position": [
         980,
         420
-      ]
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "Eros → n8n (Header X-N8N-Secret = N8N_WEBHOOK_SECRET)"
+        }
+      }
     }
   ],
   "connections": {
