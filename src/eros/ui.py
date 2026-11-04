@@ -93,10 +93,6 @@ HTML_DASHBOARD = r"""<!DOCTYPE html>
                 :class="activeTab === 'metrics' ? 'border-[#ff3e00] text-white font-bold' : 'border-transparent text-zinc-400 hover:text-white'">
           Métricas & Vacantes
         </button>
-        <button @click="activeTab = 'content'" class="py-3 text-xs font-mono-code border-b-2 transition-colors uppercase tracking-wider whitespace-nowrap"
-                :class="activeTab === 'content' ? 'border-[#ff3e00] text-white font-bold' : 'border-transparent text-zinc-400 hover:text-white'">
-          Contenido Omnicanal
-        </button>
         <button @click="activeTab = 'sources'" class="py-3 text-xs font-mono-code border-b-2 transition-colors uppercase tracking-wider whitespace-nowrap"
                 :class="activeTab === 'sources' ? 'border-[#ff3e00] text-white font-bold' : 'border-transparent text-zinc-400 hover:text-white'">
           Fuentes de Empleo
@@ -247,201 +243,7 @@ HTML_DASHBOARD = r"""<!DOCTYPE html>
           </div>
         </div>
 
-        <!-- TAB 2: CONTENIDO OMNICANAL -->
-        <div v-if="activeTab === 'content'" class="space-y-6">
-          <!-- Cards de Métricas de Contenido -->
-          <div class="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
-            <div class="bg-[#101114] border border-white/10 rounded-lg p-4 space-y-1">
-              <span class="text-[10px] text-zinc-400 uppercase font-mono-code">Total Posts</span>
-              <p class="text-2xl font-bold font-mono-code text-white">{{ contentPosts.length }}</p>
-            </div>
-            <div class="bg-[#101114] border border-amber-500/20 rounded-lg p-4 space-y-1">
-              <span class="text-[10px] text-amber-400 uppercase font-mono-code">Borradores (Draft)</span>
-              <p class="text-2xl font-bold font-mono-code text-amber-400">{{ contentDraftsCount }}</p>
-            </div>
-            <div class="bg-[#101114] border border-emerald-500/20 rounded-lg p-4 space-y-1">
-              <span class="text-[10px] text-emerald-400 uppercase font-mono-code">Despachados n8n</span>
-              <p class="text-2xl font-bold font-mono-code text-emerald-400">{{ contentPublishedCount }}</p>
-            </div>
-            <div class="bg-[#101114] border border-white/5 rounded-lg p-4 space-y-1">
-              <span class="text-[10px] text-zinc-500 uppercase font-mono-code">Descartados</span>
-              <p class="text-2xl font-bold font-mono-code text-zinc-500">{{ contentRejectedCount }}</p>
-            </div>
-          </div>
-
-          <!-- Barra de Acciones y Filtros de Contenido -->
-          <div class="bg-[#101114] border border-white/10 rounded-lg p-4 flex flex-wrap items-center justify-between gap-3">
-            <div class="flex items-center gap-2 flex-wrap">
-              <button @click="contentFilter = 'all'"
-                      class="px-3 py-1.5 rounded text-xs font-mono-code uppercase transition-colors"
-                      :class="contentFilter === 'all' ? 'bg-[#ff3e00] text-[#09090b] font-bold' : 'bg-white/5 text-zinc-400 hover:text-white'">
-                Todos ({{ contentPosts.length }})
-              </button>
-              <button @click="contentFilter = 'draft'"
-                      class="px-3 py-1.5 rounded text-xs font-mono-code uppercase transition-colors"
-                      :class="contentFilter === 'draft' ? 'bg-[#ff3e00] text-[#09090b] font-bold' : 'bg-white/5 text-zinc-400 hover:text-white'">
-                Borradores ({{ contentDraftsCount }})
-              </button>
-              <button @click="contentFilter = 'published'"
-                      class="px-3 py-1.5 rounded text-xs font-mono-code uppercase transition-colors"
-                      :class="contentFilter === 'published' ? 'bg-[#ff3e00] text-[#09090b] font-bold' : 'bg-white/5 text-zinc-400 hover:text-white'">
-                Publicados ({{ contentPublishedCount }})
-              </button>
-              <button @click="contentFilter = 'rejected'"
-                      class="px-3 py-1.5 rounded text-xs font-mono-code uppercase transition-colors"
-                      :class="contentFilter === 'rejected' ? 'bg-[#ff3e00] text-[#09090b] font-bold' : 'bg-white/5 text-zinc-400 hover:text-white'">
-                Descartados ({{ contentRejectedCount }})
-              </button>
-            </div>
-
-            <div class="flex items-center gap-2">
-              <button @click="showNewPostModal = true"
-                      class="px-3.5 py-2 rounded bg-[#ff3e00] hover:bg-[#e03700] text-[#09090b] font-bold text-xs font-mono-code transition-colors">
-                + Generar Nuevo Post
-              </button>
-              <button @click="loadContentPosts" class="text-xs font-mono-code text-zinc-400 hover:text-white px-2 py-1">
-                Refrescar
-              </button>
-            </div>
-          </div>
-
-          <!-- Listado de Tarjetas de Publicación -->
-          <div v-if="filteredPosts.length" class="space-y-4">
-            <div v-for="p in filteredPosts" :key="p.id"
-                 class="bg-[#101114] border border-white/10 rounded-lg p-5 space-y-4 hover:border-white/20 transition-all">
-              
-              <!-- Cabecera de la Publicación -->
-              <div class="flex flex-wrap items-start justify-between gap-3 border-b border-white/5 pb-3">
-                <div class="space-y-1">
-                  <div class="flex items-center gap-2 flex-wrap">
-                    <span class="text-[10px] uppercase px-2 py-0.5 rounded font-mono-code font-bold bg-[#ff3e00]/15 text-[#ff3e00] border border-[#ff3e00]/30">
-                      {{ p.pillar }}
-                    </span>
-                    <span class="text-[10px] uppercase px-2 py-0.5 rounded font-mono-code"
-                          :class="p.status === 'published' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : (p.status === 'draft' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' : 'bg-zinc-500/10 text-zinc-400 border border-zinc-500/20')">
-                      {{ p.status }}
-                    </span>
-                    <span class="text-[11px] text-zinc-500 font-mono-code">{{ formatDate(p.created_at) }}</span>
-                  </div>
-                  <h3 class="text-sm font-bold text-white font-mono-code">{{ p.title }}</h3>
-                </div>
-
-                <!-- Botones de Acción -->
-                <div class="flex items-center gap-2 flex-wrap">
-                  <a :href="`/api/content/carousel/${p.id}/html`" target="_blank" rel="noopener noreferrer"
-                     class="px-2.5 py-1.5 rounded bg-white/5 hover:bg-white/10 text-xs font-mono-code text-zinc-300 border border-white/10 flex items-center gap-1">
-                    Ver Carousel Web ↗
-                  </a>
-                  <button v-if="p.status === 'draft'" @click="publishPost(p.id)" :disabled="publishLoading[p.id]"
-                          class="px-3 py-1.5 rounded bg-emerald-500 hover:bg-emerald-600 text-[#09090b] font-bold text-xs font-mono-code transition-colors disabled:opacity-50">
-                    {{ publishLoading[p.id] ? 'Enviando...' : 'Aprobar y Despachar a n8n' }}
-                  </button>
-                  <button v-if="p.status === 'draft'" @click="updatePostStatus(p.id, 'rejected')"
-                          class="px-2.5 py-1.5 rounded bg-white/5 hover:bg-white/10 text-xs font-mono-code text-zinc-400 border border-white/10">
-                    Descartar
-                  </button>
-                  <button @click="deletePost(p.id)" class="px-2 py-1.5 text-zinc-600 hover:text-rose-400 text-xs font-mono-code" title="Eliminar">
-                    ×
-                  </button>
-                </div>
-              </div>
-
-              <!-- Hook de LinkedIn -->
-              <div class="space-y-1">
-                <div class="flex items-center justify-between">
-                  <span class="text-[10px] uppercase font-mono-code text-zinc-400">Hook LinkedIn & Twitter:</span>
-                  <button @click="copyText(p.hook, 'Hook copiado')" class="text-[10px] text-[#ff3e00] hover:underline font-mono-code">Copiar</button>
-                </div>
-                <div class="p-3 rounded bg-[#16171b] border border-white/5 text-xs text-zinc-200 font-mono-code whitespace-pre-wrap">
-                  {{ p.hook }}
-                </div>
-              </div>
-
-              <!-- Primer Comentario con Enlaces -->
-              <div class="space-y-1">
-                <div class="flex items-center justify-between">
-                  <span class="text-[10px] uppercase font-mono-code text-zinc-400">Primer Comentario (Sin penalización en LinkedIn):</span>
-                  <button @click="copyText(p.first_comment, 'Comentario copiado')" class="text-[10px] text-[#ff3e00] hover:underline font-mono-code">Copiar</button>
-                </div>
-                <div class="p-2.5 rounded bg-[#0c0d10] border border-white/5 text-xs text-zinc-300 font-mono-code">
-                  <code>{{ p.first_comment }}</code>
-                </div>
-              </div>
-
-              <!-- Secciones Desplegables (X Thread, Dev.to, Diapositivas) -->
-              <div class="grid grid-cols-1 md:grid-cols-3 gap-3 pt-2">
-                <!-- X / Twitter Thread -->
-                <div class="p-3 rounded bg-[#16171b] border border-white/5 space-y-2">
-                  <div class="flex items-center justify-between">
-                    <span class="text-xs font-bold text-white font-mono-code">Hilo de X (Twitter)</span>
-                    <span class="text-[10px] text-zinc-400 font-mono-code">{{ p.twitter_thread ? p.twitter_thread.length : 0 }} tweets</span>
-                  </div>
-                  <button @click="toggleExpanded(p.id, 'twitter')" class="text-[11px] text-[#ff3e00] font-mono-code hover:underline">
-                    {{ isExpanded(p.id, 'twitter') ? 'Ocultar Hilo' : 'Ver Hilo Completo' }}
-                  </button>
-                  <div v-if="isExpanded(p.id, 'twitter')" class="space-y-2 pt-2 border-t border-white/5">
-                    <div v-for="(t, idx) in p.twitter_thread" :key="idx"
-                         class="p-2 rounded bg-black/40 text-[11px] font-mono-code text-zinc-300 space-y-1 border border-white/5">
-                      <div class="flex justify-between text-[10px] text-zinc-500">
-                        <span>Tweet {{ idx + 1 }}/{{ p.twitter_thread.length }}</span>
-                        <button @click="copyText(t, `Tweet ${idx + 1} copiado`)" class="text-[#ff3e00] hover:underline">Copiar</button>
-                      </div>
-                      <p class="whitespace-pre-wrap">{{ t }}</p>
-                    </div>
-                  </div>
-                </div>
-
-                <!-- Diapositivas Carrusel -->
-                <div class="p-3 rounded bg-[#16171b] border border-white/5 space-y-2">
-                  <div class="flex items-center justify-between">
-                    <span class="text-xs font-bold text-white font-mono-code">Carrusel LinkedIn</span>
-                    <span class="text-[10px] text-zinc-400 font-mono-code">{{ p.carousel_slides ? p.carousel_slides.length : 0 }} slides</span>
-                  </div>
-                  <button @click="toggleExpanded(p.id, 'carousel')" class="text-[11px] text-[#ff3e00] font-mono-code hover:underline">
-                    {{ isExpanded(p.id, 'carousel') ? 'Ocultar Esquema' : 'Ver Esquema' }}
-                  </button>
-                  <div v-if="isExpanded(p.id, 'carousel')" class="space-y-2 pt-2 border-t border-white/5">
-                    <div v-for="s in p.carousel_slides" :key="s.number"
-                         class="p-2 rounded bg-black/40 text-[11px] font-mono-code text-zinc-300 space-y-0.5 border border-white/5">
-                      <div class="text-[10px] text-[#ff3e00] font-bold">Slide {{ s.number }}: {{ s.title }}</div>
-                      <div v-if="s.subtitle" class="text-zinc-400 text-[10px]">{{ s.subtitle }}</div>
-                      <div v-if="s.body" class="text-zinc-300 text-[10px]">{{ s.body }}</div>
-                      <div v-if="s.code" class="p-1 rounded bg-[#08090a] text-[10px] text-emerald-400 font-mono-code">{{ s.code }}</div>
-                    </div>
-                  </div>
-                </div>
-
-                <!-- Artículo Dev.to -->
-                <div class="p-3 rounded bg-[#16171b] border border-white/5 space-y-2">
-                  <div class="flex items-center justify-between">
-                    <span class="text-xs font-bold text-white font-mono-code">Artículo Dev.to</span>
-                    <span class="text-[10px] text-zinc-400 font-mono-code">Markdown</span>
-                  </div>
-                  <button @click="toggleExpanded(p.id, 'devto')" class="text-[11px] text-[#ff3e00] font-mono-code hover:underline">
-                    {{ isExpanded(p.id, 'devto') ? 'Ocultar Markdown' : 'Ver Markdown' }}
-                  </button>
-                  <div v-if="isExpanded(p.id, 'devto')" class="space-y-1 pt-2 border-t border-white/5">
-                    <div class="flex justify-end">
-                      <button @click="copyText(p.devto_markdown, 'Markdown copiado')" class="text-[10px] text-[#ff3e00] hover:underline font-mono-code">Copiar Markdown</button>
-                    </div>
-                    <pre class="p-2 rounded bg-black/40 text-[10px] font-mono-code text-zinc-300 max-h-48 overflow-y-auto whitespace-pre-wrap">{{ p.devto_markdown }}</pre>
-                  </div>
-                </div>
-              </div>
-
-            </div>
-          </div>
-
-          <div v-else class="p-12 text-center bg-[#101114] border border-white/10 rounded-lg space-y-3">
-            <p class="text-xs text-zinc-400 font-mono-code">No hay publicaciones con el filtro seleccionado.</p>
-            <button @click="showNewPostModal = true"
-                    class="px-4 py-2 rounded bg-[#ff3e00] text-[#09090b] font-bold text-xs font-mono-code">
-              + Generar Primer Post
-            </button>
-          </div>
-        </div>
-
-        <!-- TAB 3: FUENTES DE EMPLEO -->
+        <!-- TAB 2: FUENTES DE EMPLEO -->
         <div v-if="activeTab === 'sources'" class="bg-[#101114] border border-white/10 rounded-lg p-6 space-y-6">
           <div class="space-y-1">
             <h2 class="text-sm font-bold text-white uppercase font-mono-code">Fuentes de Empleo Conectadas</h2>
@@ -470,7 +272,7 @@ HTML_DASHBOARD = r"""<!DOCTYPE html>
           </div>
         </div>
 
-        <!-- TAB 4: FILTROS & MATCHING -->
+        <!-- TAB 3: FILTROS & MATCHING -->
         <div v-if="activeTab === 'matching'" class="bg-[#101114] border border-white/10 rounded-lg p-6 space-y-6">
           <div class="space-y-1">
             <h2 class="text-sm font-bold text-white uppercase font-mono-code">Reglas de Matching y Filtros</h2>
@@ -524,7 +326,7 @@ HTML_DASHBOARD = r"""<!DOCTYPE html>
           </div>
         </div>
 
-        <!-- TAB 5: CONEXIONES & DIAGNÓSTICO -->
+        <!-- TAB 4: CONEXIONES & DIAGNÓSTICO -->
         <div v-if="activeTab === 'diagnostics'" class="space-y-4">
           <div class="bg-[#101114] border border-white/10 rounded-lg p-6 space-y-6">
             <div class="space-y-1">
@@ -666,51 +468,11 @@ HTML_DASHBOARD = r"""<!DOCTYPE html>
         </div>
       </div>
 
-      <!-- MODAL GENERAR NUEVO POST -->
-      <div v-if="showNewPostModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm">
-        <div class="max-w-lg w-full bg-[#101114] border border-white/15 rounded-xl p-6 shadow-2xl space-y-4 font-mono-code">
-          <div class="flex items-center justify-between border-b border-white/10 pb-3">
-            <h2 class="text-sm font-bold text-white uppercase">Generar Publicación Omnicanal</h2>
-            <button @click="showNewPostModal = false" class="text-zinc-400 hover:text-white text-lg">×</button>
-          </div>
-
-          <form @submit.prevent="generatePostAction" class="space-y-4">
-            <div class="space-y-1">
-              <label class="block text-xs font-medium text-zinc-300">Tema o Título Técnico:</label>
-              <input type="text" v-model="newPostForm.topic" placeholder="Ej: Optimización de arquitectura Nuxt 3 y TypeScript..." required
-                     class="w-full bg-[#16171b] border border-white/10 rounded px-3 py-2 text-xs text-white focus:outline-none focus:border-[#ff3e00]">
-            </div>
-
-            <div class="space-y-1">
-              <label class="block text-xs font-medium text-zinc-300">Puntos Clave / Insights (opcional, uno por línea):</label>
-              <textarea v-model="newPostForm.keyPoints" rows="3" placeholder="Punto 1: Reducción de latencia con caché SSR...&#10;Punto 2: Tipado estricto..."
-                        class="w-full bg-[#16171b] border border-white/10 rounded px-3 py-2 text-xs text-white focus:outline-none focus:border-[#ff3e00]"></textarea>
-            </div>
-
-            <div class="space-y-1">
-              <label class="block text-xs font-medium text-zinc-300">Proyecto Relacionado (opcional):</label>
-              <input type="text" v-model="newPostForm.projectName" placeholder="Ej: Portafolio (mateogs.tech) / Eros Career OS"
-                     class="w-full bg-[#16171b] border border-white/10 rounded px-3 py-2 text-xs text-white focus:outline-none focus:border-[#ff3e00]">
-            </div>
-
-            <div class="pt-2 border-t border-white/10 flex justify-end gap-2">
-              <button type="button" @click="showNewPostModal = false" class="px-4 py-2 rounded bg-white/5 hover:bg-white/10 text-xs text-zinc-400">
-                Cancelar
-              </button>
-              <button type="submit" :disabled="generateLoading"
-                      class="px-4 py-2 rounded bg-[#ff3e00] hover:bg-[#e03700] text-[#09090b] font-bold text-xs transition-colors disabled:opacity-50">
-                {{ generateLoading ? 'Generando en Gemini...' : 'Generar Omnicanal' }}
-              </button>
-            </div>
-          </form>
-        </div>
-      </div>
-
     </div>
   </div>
 
   <script>
-    const { createApp, ref, reactive, computed, onMounted } = Vue
+    const { createApp, ref, reactive, onMounted } = Vue
 
     createApp({
       setup() {
@@ -725,20 +487,6 @@ HTML_DASHBOARD = r"""<!DOCTYPE html>
         const stats = ref({})
         const recentJobs = ref([])
         const selectedJob = ref(null)
-
-        // Módulo de Contenido
-        const contentPosts = ref([])
-        const contentFilter = ref('all')
-        const showNewPostModal = ref(false)
-        const generateLoading = ref(false)
-        const publishLoading = reactive({})
-        const expandedSections = reactive({})
-
-        const newPostForm = reactive({
-          topic: '',
-          keyPoints: '',
-          projectName: ''
-        })
 
         const config = reactive({
           match_min_score: 75,
@@ -782,7 +530,6 @@ HTML_DASHBOARD = r"""<!DOCTYPE html>
               authenticated.value = data.authenticated
               if (data.authenticated) {
                 loadData()
-                loadContentPosts()
               }
             }
           } catch {
@@ -805,7 +552,6 @@ HTML_DASHBOARD = r"""<!DOCTYPE html>
               authenticated.value = true
               showToast('Acceso autorizado')
               loadData()
-              loadContentPosts()
             } else {
               showToast('Clave incorrecta', 'err')
             }
@@ -845,150 +591,6 @@ HTML_DASHBOARD = r"""<!DOCTYPE html>
             }
           } catch (e) {
             console.error('Error cargando datos:', e)
-          }
-        }
-
-        async function loadContentPosts() {
-          try {
-            const res = await fetch('/api/content/posts?limit=50', { headers: authHeaders() })
-            if (res.ok) {
-              const d = await res.json()
-              contentPosts.value = d.data || []
-            }
-          } catch (e) {
-            console.error('Error cargando posts:', e)
-          }
-        }
-
-        const contentDraftsCount = computed(() => {
-          return contentPosts.value.filter(p => p.status === 'draft').length
-        })
-
-        const contentPublishedCount = computed(() => {
-          return contentPosts.value.filter(p => p.status === 'published').length
-        })
-
-        const contentRejectedCount = computed(() => {
-          return contentPosts.value.filter(p => p.status === 'rejected').length
-        })
-
-        const filteredPosts = computed(() => {
-          if (contentFilter.value === 'all') return contentPosts.value
-          return contentPosts.value.filter(p => p.status === contentFilter.value)
-        })
-
-        async function generatePostAction() {
-          if (!newPostForm.topic.trim()) return showToast('Ingresá un tema', 'err')
-          generateLoading.value = true
-          try {
-            const points = newPostForm.keyPoints
-              .split('\n')
-              .map(p => p.trim())
-              .filter(p => p.length > 0)
-
-            const body = {
-              topic: newPostForm.topic.trim(),
-              key_points: points,
-              project_name: newPostForm.projectName.trim() || undefined
-            }
-
-            const res = await fetch('/api/content/generate', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', ...authHeaders() },
-              body: JSON.stringify(body)
-            })
-
-            if (res.ok) {
-              showToast('Publicación generada con éxito')
-              showNewPostModal.value = false
-              newPostForm.topic = ''
-              newPostForm.keyPoints = ''
-              newPostForm.projectName = ''
-              loadContentPosts()
-            } else {
-              const d = await res.json()
-              showToast(d.detail || 'Error generando publicación', 'err')
-            }
-          } catch (e) {
-            showToast('Fallo de conexión al generar post', 'err')
-          } finally {
-            generateLoading.value = false
-          }
-        }
-
-        async function publishPost(postId) {
-          publishLoading[postId] = true
-          try {
-            const res = await fetch(`/api/content/posts/${postId}/publish`, {
-              method: 'POST',
-              headers: authHeaders()
-            })
-            const d = await res.json()
-            if (res.ok && d.ok) {
-              showToast('Publicación despachada a n8n')
-              loadContentPosts()
-            } else {
-              showToast(d.detail || 'Falla al despachar a n8n', 'err')
-            }
-          } catch {
-            showToast('Error de red', 'err')
-          } finally {
-            publishLoading[postId] = false
-          }
-        }
-
-        async function updatePostStatus(postId, newStatus) {
-          try {
-            const res = await fetch(`/api/content/posts/${postId}/status`, {
-              method: 'PATCH',
-              headers: { 'Content-Type': 'application/json', ...authHeaders() },
-              body: JSON.stringify({ status: newStatus })
-            })
-            if (res.ok) {
-              showToast(`Estado actualizado: ${newStatus}`)
-              loadContentPosts()
-            } else {
-              showToast('Error actualizando estado', 'err')
-            }
-          } catch {
-            showToast('Error de red', 'err')
-          }
-        }
-
-        async function deletePost(postId) {
-          if (!confirm('¿Eliminar esta publicación?')) return
-          try {
-            const res = await fetch(`/api/content/posts/${postId}`, {
-              method: 'DELETE',
-              headers: authHeaders()
-            })
-            if (res.ok) {
-              showToast('Publicación eliminada')
-              loadContentPosts()
-            }
-          } catch {
-            showToast('Error al eliminar', 'err')
-          }
-        }
-
-        function isExpanded(postId, section) {
-          return Boolean(expandedSections[`${postId}_${section}`])
-        }
-
-        function toggleExpanded(postId, section) {
-          const k = `${postId}_${section}`
-          expandedSections[k] = !expandedSections[k]
-        }
-
-        function formatDate(dt) {
-          if (!dt) return '—'
-          try {
-            return new Date(dt).toLocaleString('es-AR', {
-              day: '2-digit', month: '2-digit', year: 'numeric',
-              hour: '2-digit', minute: '2-digit'
-            })
-          } catch {
-            return dt
           }
         }
 
@@ -1111,16 +713,6 @@ HTML_DASHBOARD = r"""<!DOCTYPE html>
           stats,
           recentJobs,
           selectedJob,
-          contentPosts,
-          contentFilter,
-          filteredPosts,
-          contentDraftsCount,
-          contentPublishedCount,
-          contentRejectedCount,
-          showNewPostModal,
-          newPostForm,
-          generateLoading,
-          publishLoading,
           config,
           testing,
           testResult,
@@ -1128,14 +720,6 @@ HTML_DASHBOARD = r"""<!DOCTYPE html>
           login,
           logout,
           loadData,
-          loadContentPosts,
-          generatePostAction,
-          publishPost,
-          updatePostStatus,
-          deletePost,
-          isExpanded,
-          toggleExpanded,
-          formatDate,
           openJobModal,
           copyText,
           saveConfig,

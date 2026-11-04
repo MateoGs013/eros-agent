@@ -19,7 +19,7 @@ class GeminiQuotaExceededError(RuntimeError):
 class LLMUnavailableError(RuntimeError):
     """No hay IA disponible (sin clave, cuota agotada o todos los modelos fallaron).
 
-    Lo que necesita redacción real (CV, pitch, posts) falla con este error en vez de
+    Lo que necesita redacción real (CV, pitch, artículos) falla con este error en vez de
     inventar texto: el modo heurístico solo existe para estimar el puntaje de una vacante.
     """
     pass

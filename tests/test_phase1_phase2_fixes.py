@@ -21,7 +21,7 @@ from eros.hunter.dispatcher import JobApplicationDispatcher
 from eros.hunter.cv_generator import CVGenerator
 from eros.hunter.pitch import PitchGenerator
 from eros.hunter.matcher import JobMatcher
-from eros.api import verify_webhook_auth, app
+from eros.api import app
 import httpx
 
 
@@ -39,7 +39,7 @@ class TestPhase1Phase2Fixes(unittest.IsolatedAsyncioTestCase):
             candidate_name="Mateo Sonzogni",
             smtp_from="mateogabus@gmail.com",
             eros_api_key="secret_test_key_12345",
-            n8n_webhook_secret="",  # empty to test fail-closed
+            n8n_webhook_secret="",
         )
 
         self.dispatcher = JobApplicationDispatcher(storage=self.storage)
@@ -212,20 +212,6 @@ class TestPhase1Phase2Fixes(unittest.IsolatedAsyncioTestCase):
         sent_subject = mock_post.call_args[1]["json"]["subject"]
         self.assertNotIn("\r", sent_subject)
         self.assertNotIn("\n", sent_subject)
-
-    async def test_05_webhook_auth_fail_closed(self):
-        """Verifica que verify_webhook_auth sea fail-closed cuando no hay secret ni token."""
-        from fastapi import HTTPException
-
-        with patch("eros.api.get_settings") as mock_settings:
-            # Sin secrets configurados en el servidor
-            mock_settings.return_value.n8n_webhook_secret = ""
-            mock_settings.return_value.eros_api_key = ""
-
-            with self.assertRaises(HTTPException) as ctx:
-                verify_webhook_auth(x_n8n_secret=None, x_eros_key=None, authorization=None)
-            self.assertEqual(ctx.exception.status_code, 401)
-            self.assertIn("fail-closed", ctx.exception.detail)
 
     async def test_06_prompt_xml_delimiters_and_xss_prevention(self):
         """Verifica que los prompts incluyan <job_posting> y cv.language esté restringido."""

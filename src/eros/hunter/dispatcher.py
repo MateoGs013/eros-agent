@@ -56,7 +56,6 @@ class JobApplicationDispatcher:
     - Marca «enviando» de forma atómica antes de enviar: dos pedidos simultáneos no mandan dos correos.
     - Manda una clave de idempotencia estable por vacante (header Idempotency-Key) a n8n.
     - Sin proveedor configurado no registra la postulación ni responde ok.
-    - Nunca usa el webhook de contenido para postulaciones.
     """
 
     def __init__(self, storage: JobStorage | None = None, engine: Any = None):
