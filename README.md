@@ -96,11 +96,26 @@ Las tareas viven en memoria: si Eros se reinicia, `GET /api/tasks/{id}` responde
 | `POST` | `/api/jobs/{id}/find-email` | Busca un correo real; devuelve `contact_email`, `contact_email_source`, `source`, `found`. |
 | `PATCH` | `/api/jobs/{id}/contact-email` | Correo escrito a mano (`contact_email_source: "manual"`). |
 | `GET` | `/api/jobs/{id}/apply-preview` | Vista previa con `contact_email_source`, `contact_email_verified`, `requires_manual_email`, `pitch_source`. |
-| `POST` | `/api/jobs/{id}/apply-email` | Envía la postulación. Errores con `detail` + `error_code` (ver abajo). |
+| `POST` | `/api/jobs/{id}/apply-email` | Envía la postulación con el CV que manda el portafolio en `cv` (obligatorio). Errores con `detail` + `error_code` (ver abajo). |
 | `POST` | `/api/cv/{job_id}` | Genera CV Harvard ATS adaptado (503 sin IA). |
 | `GET` | `/api/jobs/{id}/cv/html` · `/pdf` | Solo el CV ya guardado. Requiere la clave o `?token=` firmado de esa vacante. Nunca genera con IA. |
 | `POST` | `/api/radar/scan` · `GET` `/api/radar/trends` | Radar de tendencias (Hacker News, Dev.to, GitHub): punto de partida de los artículos con `trend_id`. |
 | `GET` | `/health` | 200 si la base responde, 503 si no. |
+
+### El CV de `apply-email`
+
+Eros no adjunta un CV propio. El admin del portafolio arma el CV Harvard ATS de la vacante desde su base,
+lo imprime a PDF (una página A4, cota de 248–265 mm) y lo manda en el cuerpo:
+
+```json
+{ "to_email": "…", "subject": "…", "body": "…", "channel": "n8n", "confirmed": true, "force_retry": false,
+  "cv": { "filename": "CV_….pdf", "pdf_base64": "…", "text": "…", "sha256": "…", "lang": "es", "height_mm": 256.4 } }
+```
+
+`src/eros/hunter/attached_cv.py` lo valida (base64, `%PDF-`, hasta 2 MB, sha256, nombre sin rutas, texto) antes de
+tomar la marca de envío. n8n recibe esos bytes en `cv_pdf_base64`, más `cv_filename`, `cv_text`, `cv_sha256` y `cv_lang`;
+`cv_data` y `cv_html_url` van en `null`. SMTP adjunta los mismos bytes. Telegram ya no postula: responde que se postula
+desde el admin.
 
 ### Errores de `apply-email`
 
@@ -109,6 +124,7 @@ Las tareas viven en memoria: si Eros se reinicia, `GET /api/tasks/{id}` responde
 | `already_applied` / `send_in_progress` | 409 | Ya se postuló / hay un envío en curso. |
 | `send_outcome_unknown` | 409 / 504 | Un envío se cortó: revisar «Enviados»; reintentar con `force_retry: true`. |
 | `missing_email` / `invalid_email` / `unverified_email` | 422 | Falta, es inválido o no se sabe de dónde salió: escribir la dirección (`to_email`). |
+| `cv_required` / `invalid_cv` | 422 | Falta el `cv` del portafolio o no es válido. No se envió nada ni se tomó la marca. |
 | `requires_confirmation` | 428 | Correo encontrado automáticamente: mandar `confirmed: true`. |
 | `no_provider` | 503 | No hay `N8N_APPLICATION_WEBHOOK_URL` ni `SMTP_HOST`. No se marcó como postulada. |
 | `provider_rejected` | 502 | n8n/SMTP rechazó el envío (seguro que no salió). |

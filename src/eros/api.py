@@ -156,6 +156,9 @@ class ApplyEmailRequest(BaseModel):
     confirmed: bool = False
     # Reintentar un envío que se cortó sin saber si salió (send_state="unknown")
     force_retry: bool = False
+    # El CV que armó el portafolio desde su base ({filename, pdf_base64, text, sha256, lang?, height_mm?}).
+    # Obligatorio: sin él responde 422 cv_required. Lo valida eros.hunter.attached_cv.
+    cv: dict[str, Any] | None = None
 
 
 class ContactEmailUpdateRequest(BaseModel):
@@ -641,6 +644,8 @@ async def get_apply_preview(job_id: str):
 APPLY_ERROR_STATUS = {
     "job_not_found": 404,
     "already_applied": 409,
+    "cv_required": 422,
+    "invalid_cv": 422,
     "send_in_progress": 409,
     "send_outcome_unknown": 409,
     "missing_email": 422,
@@ -655,9 +660,10 @@ APPLY_ERROR_STATUS = {
 
 @app.post("/api/jobs/{job_id}/apply-email", dependencies=[Depends(verify_auth)])
 async def apply_job_by_email(job_id: str, payload: ApplyEmailRequest | None = None):
-    """Despacha la postulación con CV y pitch vía el webhook de postulaciones de n8n o SMTP.
+    """Despacha la postulación vía el webhook de postulaciones de n8n o SMTP, con el CV que manda el portafolio.
 
     ok=true solo si un proveedor aceptó el envío. Los errores llevan `detail` y `error_code`.
+    Sin `cv` responde 422 cv_required: Eros nunca adjunta un CV propio.
     """
     req = payload or ApplyEmailRequest()
     res = await engine.app_dispatcher.dispatch_application(
@@ -668,6 +674,7 @@ async def apply_job_by_email(job_id: str, payload: ApplyEmailRequest | None = No
         channel=req.channel,
         confirmed=req.confirmed,
         force_retry=req.force_retry,
+        cv=req.cv,
     )
     if not res.get("ok"):
         if res.get("error_code") == "send_outcome_unknown" and res.get("provider"):

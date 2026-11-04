@@ -27,6 +27,7 @@ from eros.integrations.llm import LLMClient, LLMOutputError, LLMUnavailableError
 from eros.models import JobOffer, JobStatus, MatchResult, ProfileContext
 from eros.radar.models import TrendItem, TrendSource, TrendStatus
 from eros.radar.storage import RadarStorage
+from portfolio_cv import portfolio_cv
 
 API_KEY = "eros_audit_test_key_0123456789"
 AUTH = {"Authorization": f"Bearer {API_KEY}"}
@@ -88,7 +89,7 @@ class TestIdempotentDispatch(_TempDbCase):
         await self.storage.save_job(job)
 
     async def _send(self, **kw):
-        args = dict(job_id="job-send-1", to_email="rrhh@acme.io", custom_subject="Postulación", custom_body="Cuerpo", confirmed=True)
+        args = dict(job_id="job-send-1", to_email="rrhh@acme.io", custom_subject="Postulación", custom_body="Cuerpo", confirmed=True, cv=portfolio_cv())
         args.update(kw)
         return await self.dispatcher.dispatch_application(**args)
 
@@ -190,7 +191,7 @@ class TestIdempotentDispatch(_TempDbCase):
         ok = MagicMock(status_code=200, text="OK")
         with patch("httpx.AsyncClient.post", new_callable=AsyncMock, return_value=ok):
             res = await self.dispatcher.dispatch_application(
-                job_id="job-legacy-email", to_email="peter@acme.io", confirmed=True
+                job_id="job-legacy-email", to_email="peter@acme.io", confirmed=True, cv=portfolio_cv()
             )
         self.assertTrue(res["ok"], res)
         self.assertEqual(res["contact_email_source"], "manual")

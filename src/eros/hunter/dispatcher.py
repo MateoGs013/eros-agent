@@ -1,5 +1,4 @@
 import asyncio
-import base64
 import email.utils
 import json
 import logging
@@ -14,7 +13,7 @@ from typing import Any
 import httpx
 from eros.config import get_settings
 from eros.db.storage import JobStorage
-from eros.hunter.cv_generator import CVGenerator
+from eros.hunter.attached_cv import AttachedCV, AttachedCVError, parse_attached_cv
 from eros.hunter.email_finder import (
     EMAIL_SOURCE_MANUAL,
     EMAIL_SOURCE_POSTING,
@@ -24,8 +23,7 @@ from eros.hunter.email_finder import (
 )
 from eros.hunter.pitch import PitchGenerator
 from eros.integrations.llm import LLMOutputError, LLMUnavailableError
-from eros.models import JobOffer, JobStatus, ProfileContext, TailoredCV
-from eros.security import cv_public_url
+from eros.models import JobOffer, JobStatus, ProfileContext
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +51,8 @@ class JobApplicationDispatcher:
 
     Garantías:
     - Solo usa correos con fuente real (aviso, sitio de la empresa, Hunter.io o escrito a mano).
+    - Adjunta solo el CV que manda el portafolio en el pedido (`cv`), tal cual llegó. Nunca uno propio:
+      sin `cv` responde `cv_required` y no envía nada.
     - Marca «enviando» de forma atómica antes de enviar: dos pedidos simultáneos no mandan dos correos.
     - Manda una clave de idempotencia estable por vacante (header Idempotency-Key) a n8n.
     - Sin proveedor configurado no registra la postulación ni responde ok.
@@ -63,7 +63,6 @@ class JobApplicationDispatcher:
         self.settings = get_settings()
         self.engine = engine
         self.email_finder = EmailFinder(self.settings)
-        self.cv_gen = CVGenerator()
         self.pitch_gen = PitchGenerator()
 
     async def _get_profile(self) -> ProfileContext:
@@ -152,10 +151,7 @@ class JobApplicationDispatcher:
                     "En mi portafolio están los proyectos en producción y el detalle de cada uno."
                 )
 
-        cv_html_url = cv_public_url(job.id, "html") if job.tailored_cv else None
-        cv_line_en = f"ATS Resume (Harvard Single-Page Format):\n{cv_html_url}\n\n" if cv_html_url else ""
-        cv_line_es = f"Currículum Vitae (Formato Harvard ATS):\n{cv_html_url}\n\n" if cv_html_url else ""
-
+        # El cuerpo no enlaza la hoja del CV de Eros: el PDF que va adjunto es el del portafolio.
         if is_en:
             body = (
                 f"Dear Hiring Team at {job.company},\n\n"
@@ -165,7 +161,6 @@ class JobApplicationDispatcher:
                 f"• Live Portfolio: {self.settings.candidate_portfolio_url}\n"
                 f"• LinkedIn: {self.settings.candidate_linkedin_url}\n"
                 f"• GitHub: {self.settings.candidate_github_url}\n\n"
-                f"{cv_line_en}"
                 f"I welcome the opportunity to discuss how my technical experience can add value to your team.\n\n"
                 f"Best regards,\n\n"
                 f"{self.settings.candidate_name}\n"
@@ -181,7 +176,6 @@ class JobApplicationDispatcher:
                 f"• Portafolio en vivo: {self.settings.candidate_portfolio_url}\n"
                 f"• LinkedIn: {self.settings.candidate_linkedin_url}\n"
                 f"• GitHub: {self.settings.candidate_github_url}\n\n"
-                f"{cv_line_es}"
                 f"Quedo a su disposición para coordinar una breve conversación técnica.\n\n"
                 f"Saludos cordiales,\n\n"
                 f"{self.settings.candidate_name}\n"
@@ -205,9 +199,11 @@ class JobApplicationDispatcher:
             "subject": subject,
             "body": body,
             "pitch_source": pitch_source,
-            "cv_filename": "CV_Mateo_Sonzogni.pdf",
+            # El PDF lo arma y lo manda el portafolio al enviar: Eros no sabe su nombre ni enlaza el suyo.
+            "cv_source": "portfolio",
+            "cv_filename": None,
             "has_pdf_attachment": True,
-            "cv_html_url": cv_html_url,
+            "cv_html_url": None,
             "is_english": is_en,
             "status": job.status.value,
             "applied_at": job.applied_at,
@@ -229,22 +225,6 @@ class JobApplicationDispatcher:
             return "smtp"
         return None
 
-    async def _load_or_build_cv(self, job: JobOffer, profile: ProfileContext) -> TailoredCV:
-        # El adjunto sigue siendo el CV de Eros (el contrato con el CV de la base del portfolio
-        # está pendiente). Si la vacante no tiene uno adaptado, va el CV base escrito a mano.
-        if job.tailored_cv:
-            try:
-                return TailoredCV.model_validate_json(job.tailored_cv)
-            except Exception:
-                pass
-        tailored_cv = self.cv_gen._build_fallback_cv(profile, job)
-        try:
-            job.tailored_cv = json.dumps(tailored_cv.model_dump())
-            await self.storage.save_job(job)
-        except Exception as e:
-            logger.warning(f"No se pudo persistir tailored_cv generado en storage: {e}")
-        return tailored_cv
-
     async def dispatch_application(
         self,
         job_id: str,
@@ -254,11 +234,15 @@ class JobApplicationDispatcher:
         channel: str = "auto",
         confirmed: bool = False,
         force_retry: bool = False,
+        cv: Any = None,
     ) -> dict[str, Any]:
-        """Despacha la postulación al destinatario vía n8n o SMTP.
+        """Despacha la postulación al destinatario vía n8n o SMTP, con el CV del portafolio.
+
+        `cv` es el CV que armó el portafolio desde su base ({filename, pdf_base64, text, sha256,
+        lang?, height_mm?}): se adjunta tal cual y nunca se reemplaza por uno de Eros.
 
         Devuelve ok=True solo si un proveedor aceptó el envío. Los errores llevan
-        `error_code`: job_not_found, already_applied, send_in_progress,
+        `error_code`: job_not_found, already_applied, cv_required, invalid_cv, send_in_progress,
         send_outcome_unknown, missing_email, unverified_email, invalid_email,
         requires_confirmation, invalid_channel, no_provider, provider_rejected.
         """
@@ -328,6 +312,11 @@ class JobApplicationDispatcher:
             )
 
         # 3. Contenido (todo lo que puede fallar va antes de marcar «enviando»)
+        # El CV que armó el portafolio, tal cual llegó: sin él no hay envío (nunca uno de Eros).
+        try:
+            attached = parse_attached_cv(cv)
+        except AttachedCVError as e:
+            return _error(e.code, e.message)
         is_en = self._is_english(job)
         preview = await self.get_application_preview(job_id)
         if not preview.get("ok"):
@@ -336,12 +325,6 @@ class JobApplicationDispatcher:
         final_subject = raw_subject.replace("\r", " ").replace("\n", " ").strip()
         final_body = (custom_body or preview.get("body", "")).strip()
 
-        profile = await self._get_profile()
-        tailored_cv = await self._load_or_build_cv(job, profile)
-        cv_html_url = cv_public_url(job.id, "html")
-        cv_plain_text = self.cv_gen.render_plain_text(tailored_cv)
-        pdf_bytes = self.cv_gen.render_pdf(tailored_cv)
-        pdf_base64 = base64.b64encode(pdf_bytes).decode("ascii") if pdf_bytes else ""
         idem_key = self.idempotency_key(job.id)
 
         # 4. Marca atómica «enviando»: si otro pedido ya la tomó, este no envía.
@@ -364,10 +347,9 @@ class JobApplicationDispatcher:
         try:
             if provider == "n8n":
                 outcome, detail = await self._send_via_n8n(job, recipient_email, final_subject, final_body,
-                                                           pdf_base64, cv_plain_text, tailored_cv,
-                                                           cv_html_url, idem_key, now_iso)
+                                                           attached, idem_key, now_iso)
             else:
-                outcome, detail = await self._send_via_smtp(recipient_email, final_subject, final_body, pdf_bytes)
+                outcome, detail = await self._send_via_smtp(recipient_email, final_subject, final_body, attached)
         except Exception as e:  # Cualquier sorpresa después de empezar a enviar: no sabemos si salió
             logger.error(f"Error inesperado enviando la postulación de '{job.title}': {e}")
             outcome, detail = "unknown", str(e)
@@ -391,6 +373,8 @@ class JobApplicationDispatcher:
                 "status": JobStatus.APPLIED.value,
                 "applied_at": now_iso,
                 "idempotency_key": idem_key,
+                "cv_filename": attached.filename,
+                "cv_sha256": attached.sha256,
                 "message": f"Postulación enviada a {recipient_email} vía {provider.upper()}.",
             }
 
@@ -412,10 +396,7 @@ class JobApplicationDispatcher:
         recipient_email: str,
         subject: str,
         body: str,
-        pdf_base64: str,
-        cv_plain_text: str,
-        tailored_cv: TailoredCV,
-        cv_html_url: str | None,
+        cv: AttachedCV,
         idem_key: str,
         now_iso: str,
     ) -> tuple[str, str]:
@@ -438,11 +419,14 @@ class JobApplicationDispatcher:
                 "linkedin": self.settings.candidate_linkedin_url,
                 "github": self.settings.candidate_github_url,
             },
-            "cv_filename": "CV_Mateo_Sonzogni.pdf",
-            "cv_pdf_base64": pdf_base64,
-            "cv_html_url": cv_html_url,
-            "cv_text": cv_plain_text,
-            "cv_data": tailored_cv.model_dump(),
+            # El CV del portafolio, tal cual llegó. cv_html_url y cv_data quedan en null: eran el CV de Eros.
+            "cv_filename": cv.filename,
+            "cv_pdf_base64": cv.pdf_base64,
+            "cv_sha256": cv.sha256,
+            "cv_lang": cv.lang,
+            "cv_html_url": None,
+            "cv_text": cv.text,
+            "cv_data": None,
             "applied_at": now_iso,
         }
         headers = {"Idempotency-Key": idem_key}
@@ -465,7 +449,7 @@ class JobApplicationDispatcher:
         # Un 5xx puede llegar después de que el nodo de Gmail ya envió
         return "unknown", f"n8n respondió HTTP {resp.status_code}: {resp.text[:150]}"
 
-    async def _send_via_smtp(self, recipient_email: str, subject: str, body: str, pdf_bytes: bytes | None) -> tuple[str, str]:
+    async def _send_via_smtp(self, recipient_email: str, subject: str, body: str, cv: AttachedCV) -> tuple[str, str]:
         """Devuelve ("sent" | "failed" | "unknown", detalle)."""
         def _send_sync_smtp():
             msg = MIMEMultipart()
@@ -474,10 +458,9 @@ class JobApplicationDispatcher:
             msg["To"] = recipient_email
             msg.attach(MIMEText(body, "plain", "utf-8"))
 
-            if pdf_bytes:
-                pdf_part = MIMEApplication(pdf_bytes, _subtype="pdf")
-                pdf_part.add_header("Content-Disposition", "attachment", filename="CV_Mateo_Sonzogni.pdf")
-                msg.attach(pdf_part)
+            pdf_part = MIMEApplication(cv.pdf_bytes, _subtype="pdf")
+            pdf_part.add_header("Content-Disposition", "attachment", filename=cv.filename)
+            msg.attach(pdf_part)
 
             ssl_ctx = ssl.create_default_context()
             if self.settings.smtp_port == 465:

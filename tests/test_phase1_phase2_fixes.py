@@ -18,6 +18,7 @@ from eros.models import (
     TailoredCV,
 )
 from eros.hunter.dispatcher import JobApplicationDispatcher
+from portfolio_cv import portfolio_cv
 from eros.hunter.cv_generator import CVGenerator
 from eros.hunter.pitch import PitchGenerator
 from eros.hunter.matcher import JobMatcher
@@ -170,6 +171,7 @@ class TestPhase1Phase2Fixes(unittest.IsolatedAsyncioTestCase):
             res_confirmed = await self.dispatcher.dispatch_application(
                 job_id="job-extracted-email",
                 confirmed=True,
+                cv=portfolio_cv(),
             )
         self.assertTrue(res_confirmed["ok"])
         self.assertEqual(res_confirmed["provider"], "n8n")
@@ -207,6 +209,7 @@ class TestPhase1Phase2Fixes(unittest.IsolatedAsyncioTestCase):
                 custom_subject="Asunto con\r\nInyección de\r\nHeaders: Bcc: attacker@evil.com",
                 custom_body="Cuerpo limpio",
                 confirmed=True,
+                cv=portfolio_cv(),
             )
         self.assertTrue(res_crlf["ok"])
         sent_subject = mock_post.call_args[1]["json"]["subject"]
