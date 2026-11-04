@@ -56,6 +56,7 @@ class TestLongOutputs(unittest.IsolatedAsyncioTestCase):
             await self.llm.generate("hola", timeout=150.0, max_tokens=8192)
         self.assertEqual(FakeAsyncClient.instances[0].timeout, 45.0)
         self.assertEqual(FakeAsyncClient.instances[1].timeout, 150.0)
+        self.assertEqual(self.llm.last_model, "gemini-a")
 
     async def test_max_tokens_raises_and_does_not_cascade(self):
         FakeAsyncClient.body = gemini_body('{"markdown": "texto cort', finish="MAX_TOKENS")

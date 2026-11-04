@@ -20,9 +20,11 @@ from eros.integrations.llm import LLMOutputError, LLMUnavailableError
 from eros.logging_setup import configure_logging
 from eros.models import JobStatus
 from eros.security import verify_cv_token
-from eros.tasks import TaskRegistry
+from eros.tasks import TaskError, TaskRegistry
 from eros.ui import HTML_DASHBOARD
+from eros.content.article import ArticleGenerator
 from eros.content.models import (
+    ArticleGenerateRequest,
     ContentGenerateRequest,
     ContentPostStatus,
     ContentPublishRequest,
@@ -53,6 +55,7 @@ content_dispatcher = ContentDispatcher(storage=content_storage)
 telegram_bot = TelegramBot(engine=engine)
 radar_storage = RadarStorage()
 radar_engine = RadarEngine(storage=radar_storage)
+article_generator = ArticleGenerator(engine=engine, radar_storage=radar_storage)
 task_registry = TaskRegistry()
 
 
@@ -765,6 +768,33 @@ async def sync_profile():
     """Fuerza la sincronización del perfil desde la API del portafolio."""
     profile = await engine.sync_profile()
     return {"ok": True, "profile": profile}
+
+
+# ==============================================================================
+# Artículos para el portafolio (Eros los escribe; el portafolio los publica)
+# ==============================================================================
+
+@app.post("/api/articles/generate", dependencies=[Depends(verify_auth)], status_code=202)
+async def generate_article(payload: ArticleGenerateRequest | None = None):
+    """Escribe un artículo (es + en) en segundo plano y responde 202 con el id de la tarea.
+
+    Cuando termina, GET /api/tasks/{task_id} trae el artículo en `result`. Si ya hay uno
+    escribiéndose, devuelve esa tarea (already_running=true). Con trend_id, la tendencia
+    del Radar queda GENERATED al terminar. Eros nunca escribe en el portafolio.
+    """
+    req = payload or ArticleGenerateRequest()
+
+    async def job() -> dict[str, Any]:
+        try:
+            article = await article_generator.generate(req)
+        except LLMUnavailableError as e:
+            raise TaskError(f"Gemini no está disponible: {e}", code="llm_unavailable") from e
+        except LLMOutputError as e:
+            raise TaskError(str(e), code="llm_output_invalid") from e
+        return article.model_dump()
+
+    task, created = task_registry.start("article", job)
+    return _accepted(task, created)
 
 
 # ==============================================================================

@@ -8,6 +8,8 @@ from eros.config import get_settings
 
 logger = logging.getLogger(__name__)
 
+CLAUDE_MODEL = "claude-3-5-sonnet-20241022"
+
 
 class GeminiQuotaExceededError(RuntimeError):
     """Excepción cuando se agota la cuota diaria o por minuto de Google Gemini."""
@@ -41,6 +43,8 @@ class LLMClient:
 
     def __init__(self):
         self.settings = get_settings()
+        # Modelo que respondió la última llamada exitosa (la cascada puede caer en otro)
+        self.last_model: str | None = None
 
     @staticmethod
     def _start_quota_cooldown() -> None:
@@ -71,7 +75,9 @@ class LLMClient:
         """
         if prefer_model == "claude" and self.settings.anthropic_api_key:
             try:
-                return await self._call_claude(prompt, system_prompt)
+                text = await self._call_claude(prompt, system_prompt)
+                self.last_model = CLAUDE_MODEL
+                return text
             except Exception as e:
                 logger.error(f"Error llamando a Claude API: {e}. Intentando fallback con Gemini...")
 
@@ -88,7 +94,7 @@ class LLMClient:
 
             for model_name in models_to_try:
                 try:
-                    return await self._call_gemini(
+                    text = await self._call_gemini(
                         prompt,
                         system_prompt,
                         model=model_name,
@@ -97,6 +103,8 @@ class LLMClient:
                         max_tokens=max_tokens,
                         timeout=timeout,
                     )
+                    self.last_model = model_name
+                    return text
                 except LLMOutputError:
                     # Respuesta cortada por largo: otro modelo de la cascada tendría el mismo tope
                     raise
@@ -182,7 +190,7 @@ class LLMClient:
             text = "".join([p.get("text", "") for p in parts])
             return text
 
-    async def _call_claude(self, prompt: str, system_prompt: str | None = None, model: str = "claude-3-5-sonnet-20241022") -> str:
+    async def _call_claude(self, prompt: str, system_prompt: str | None = None, model: str = CLAUDE_MODEL) -> str:
         """Llama a la API de Anthropic Claude vía REST."""
         url = "https://api.anthropic.com/v1/messages"
         headers = {
