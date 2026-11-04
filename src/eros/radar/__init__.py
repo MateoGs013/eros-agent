@@ -1,6 +1,6 @@
 """Módulo TrendRadar de Eros Agent.
 Radar de tendencias tecnológicas, blogs de ingeniería, GitHub y noticias
-para generación de contenido técnico y artículos de alta señal.
+como punto de partida de los artículos del portafolio.
 """
 
 from .models import TrendItem, TrendSource, TrendStatus

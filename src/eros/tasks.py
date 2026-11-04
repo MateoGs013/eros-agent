@@ -1,4 +1,4 @@
-"""Registro en memoria de tareas largas (escaneo, evaluación en lote) que la API corre en segundo plano."""
+"""Registro en memoria de tareas largas (escaneo, evaluación en lote, artículos) que la API corre en segundo plano."""
 
 import asyncio
 import logging
@@ -8,6 +8,14 @@ from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable
 
 logger = logging.getLogger(__name__)
+
+
+class TaskError(RuntimeError):
+    """Falla de una tarea con un código estable para el cliente (va en `error_code`)."""
+
+    def __init__(self, message: str, code: str | None = None):
+        super().__init__(message)
+        self.code = code
 
 
 class TaskRegistry:
@@ -57,6 +65,7 @@ class TaskRegistry:
             "finished_at": None,
             "result": None,
             "error": None,
+            "error_code": None,
         }
         self._tasks[task_id] = entry
         self._trim()
@@ -69,6 +78,9 @@ class TaskRegistry:
                 logger.error(f"Tarea {task_id} ({kind}) falló: {e}")
                 entry["status"] = "failed"
                 entry["error"] = str(e) or e.__class__.__name__
+                # TaskError (o cualquier excepción con `code`) deja un código estable además del mensaje
+                code = getattr(e, "code", None)
+                entry["error_code"] = code if isinstance(code, str) else None
             finally:
                 entry["finished_at"] = datetime.now(timezone.utc).isoformat()
                 self._handles.pop(task_id, None)

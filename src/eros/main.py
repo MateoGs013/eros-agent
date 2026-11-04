@@ -49,7 +49,10 @@ async def main() -> None:
     parser.add_argument("--evaluate", action="store_true", help="Evaluar ofertas pendientes con el LLM")
     parser.add_argument("--server", action="store_true", help="Iniciar servidor API HTTP con FastAPI")
     parser.add_argument("--port", type=int, default=8000, help="Puerto para el servidor HTTP (default: 8000)")
-    parser.add_argument("--post", type=str, help="Generar publicación omnicanal sobre un tema técnico específico")
+    parser.add_argument(
+        "--articulo", nargs="?", const="", metavar="TEMA",
+        help="Escribir un artículo para el portafolio (sin tema, lo elige Eros) y mostrar los títulos; no lo publica",
+    )
     parser.add_argument("--bot", action="store_true", help="Iniciar bot de Telegram")
     parser.add_argument("--daemon", action="store_true", help="Modo demonio: Servidor HTTP + bot de Telegram")
 
@@ -70,23 +73,17 @@ async def main() -> None:
         print(f"• Proyectos: {[p.title for p in profile.projects]}")
         return
 
-    # 2. Generar post de contenido por CLI
-    if args.post:
-        from eros.content.generator import ContentGenerator
-        from eros.content.storage import ContentStorage
-        from eros.content.models import ContentGenerateRequest, ContentPillar
+    # 2. Escribir un artículo por CLI (prueba del generador: no se guarda ni se publica)
+    if args.articulo is not None:
+        from eros.content.article import ArticleGenerator
+        from eros.content.models import ArticleGenerateRequest
 
-        c_storage = ContentStorage()
-        await c_storage.init_db()
-        gen = ContentGenerator(storage=c_storage, engine=engine)
-        print(f"\n[GENERANDO] Creando publicación omnicanal con Gemini para: '{args.post}'...")
-        post = await gen.generate_post(ContentGenerateRequest(topic=args.post, pillar=ContentPillar.ARCHITECTURE))
-        print(f"\n[OK] Publicación generada con ID: {post.id}")
-        print(f"• Título: {post.title}")
-        print(f"• Hook:\n{post.hook}\n")
-        print(f"• Tweets: {len(post.twitter_thread)}")
-        print(f"• Slides Carousel: {len(post.carousel_slides)}")
-        print(f"• Ver Carousel en navegador: http://localhost:{args.port}/api/content/carousel/{post.id}/html")
+        print(f"\n[ESCRIBIENDO] Artículo sobre: '{args.articulo or 'tema elegido por Eros'}'...")
+        article = await ArticleGenerator(engine=engine).generate(ArticleGenerateRequest(topic=args.articulo))
+        print(f"\n[OK] Artículo escrito con {article.model}:")
+        print(f"• ES: {article.es.title}")
+        print(f"• EN: {article.en.title}")
+        print(f"• Tags: {', '.join(article.tags)}")
         return
 
     # 3. Escanear

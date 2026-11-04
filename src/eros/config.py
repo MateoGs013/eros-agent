@@ -46,15 +46,14 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     hunter_io_api_key: str = ""
 
-    # n8n Automation Webhooks
-    # n8n_webhook_url: publicación de contenido. n8n_application_webhook_url: postulaciones.
-    # Nunca se usa uno en lugar del otro. Eros manda n8n_webhook_secret en el header
-    # X-N8N-Secret de ambos; los webhooks de n8n tienen que validarlo (Header Auth).
-    n8n_webhook_url: str = ""
+    # n8n (opcional): webhook de postulaciones por correo. Eros manda n8n_webhook_secret en el
+    # header X-N8N-Secret; el webhook de n8n tiene que validarlo (Header Auth).
+    # N8N_WEBHOOK_URL (la vieja publicación en LinkedIn/X) ya no se usa: si quedó en el
+    # entorno se ignora (extra="ignore").
     n8n_application_webhook_url: str = ""
     n8n_webhook_secret: str = ""
 
-    # URL pública de Eros (enlaces del carousel y del CV en los correos)
+    # URL pública de Eros (enlaces del CV en los correos)
     public_base_url: str = "https://eros.mateogs.tech"
     # Secreto para firmar los enlaces públicos del CV (si está vacío se deriva de EROS_API_KEY)
     cv_link_secret: str = ""

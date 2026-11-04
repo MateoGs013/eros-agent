@@ -20,21 +20,12 @@ from eros.integrations.llm import LLMOutputError, LLMUnavailableError
 from eros.logging_setup import configure_logging
 from eros.models import JobStatus
 from eros.security import verify_cv_token
-from eros.tasks import TaskRegistry
+from eros.tasks import TaskError, TaskRegistry
 from eros.ui import HTML_DASHBOARD
-from eros.content.models import (
-    ContentGenerateRequest,
-    ContentPostStatus,
-    ContentPublishRequest,
-    ContentStatusUpdateRequest,
-)
-from eros.content.storage import ContentStorage
-from eros.content.generator import ContentGenerator
-from eros.content.carousel import CarouselRenderer
-from eros.content.dispatcher import ContentDispatcher
+from eros.content.article import ArticleGenerator
+from eros.content.models import ArticleGenerateRequest
 from eros.bot.telegram import TelegramBot
 from eros.radar.models import (
-    TrendGenerateRequest,
     TrendItem,
     TrendScanResponse,
     TrendStatus,
@@ -47,12 +38,10 @@ logger = logging.getLogger("eros.api")
 
 engine = HunterEngine()
 settings = get_settings()
-content_storage = ContentStorage()
-content_generator = ContentGenerator(storage=content_storage, engine=engine)
-content_dispatcher = ContentDispatcher(storage=content_storage)
 telegram_bot = TelegramBot(engine=engine)
 radar_storage = RadarStorage()
 radar_engine = RadarEngine(storage=radar_storage)
+article_generator = ArticleGenerator(engine=engine, radar_storage=radar_storage)
 task_registry = TaskRegistry()
 
 
@@ -61,7 +50,7 @@ def llm_http_error(e: Exception) -> HTTPException:
     if isinstance(e, LLMUnavailableError):
         return HTTPException(
             status_code=503,
-            detail=f"IA no disponible: {e} No se genera contenido sin IA; reintentá más tarde.",
+            detail=f"IA no disponible: {e} No se genera texto sin IA; reintentá más tarde.",
         )
     return HTTPException(status_code=502, detail=f"La IA devolvió una respuesta inválida: {e}")
 
@@ -76,9 +65,8 @@ def error_response(status_code: int, result: dict[str, Any]) -> JSONResponse:
 async def lifespan(app: FastAPI):
     # Inicializar base de datos y sincronizar perfil inicial
     await engine.initialize()
-    await content_storage.init_db()
     await radar_storage.init_db()
-    logger.info("Eros Hunter API, Content Engine y TrendRadar inicializados.")
+    logger.info("Eros Hunter API, artículos y TrendRadar inicializados.")
 
     bot_task = None
     if telegram_bot.is_configured:
@@ -108,7 +96,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Eros Career OS & Job Hunter API",
     version="0.3.0",
-    description="API y Control Center seguro del Agente Eros (Job Hunter + Content Engine)",
+    description="API y Control Center seguro del Agente Eros (Job Hunter + artículos para el portafolio)",
     lifespan=lifespan,
 )
 
@@ -209,35 +197,6 @@ async def verify_auth(
             headers={"WWW-Authenticate": "Bearer"},
         )
     return token
-
-
-def verify_webhook_auth(
-    x_n8n_secret: str | None = Header(None, alias="X-N8N-Secret"),
-    x_eros_key: str | None = Header(None, alias="X-Eros-Key"),
-    authorization: str | None = Header(None),
-) -> bool:
-    """Verifica la firma o token secreto del webhook de n8n contra N8N_WEBHOOK_SECRET o EROS_API_KEY.
-    
-    Aplica fail-closed estricto: si no hay secreto configurado, rechaza con 401.
-    """
-    expected_secret = get_settings().n8n_webhook_secret.strip() or get_settings().eros_api_key.strip()
-    if not expected_secret:
-        logger.warning("Rechazando webhook de n8n: no hay N8N_WEBHOOK_SECRET ni EROS_API_KEY configurados (fail-closed).")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Autenticación de webhook no configurada en el servidor (fail-closed).",
-        )
-
-    provided = x_n8n_secret or x_eros_key
-    if not provided and authorization and authorization.lower().startswith("bearer "):
-        provided = authorization[7:].strip()
-
-    if not provided or not secrets.compare_digest(provided.strip(), expected_secret):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="No autorizado para invocar el webhook de n8n",
-        )
-    return True
 
 
 # ==============================================================================
@@ -768,132 +727,35 @@ async def sync_profile():
 
 
 # ==============================================================================
-# Endpoints de Generación y Distribución de Contenido (Career OS)
+# Artículos para el portafolio (Eros los escribe; el portafolio los publica)
 # ==============================================================================
 
-@app.post("/api/content/generate", dependencies=[Depends(verify_auth)])
-async def generate_content(body: ContentGenerateRequest):
-    """Genera una publicación técnica omnicanal (LinkedIn, X/Twitter, Dev.to, Carousel 5 slides)."""
-    try:
-        post = await content_generator.generate_post(body)
-        return {"ok": True, "data": post}
-    except (LLMUnavailableError, LLMOutputError) as e:
-        raise llm_http_error(e)
-    except Exception as e:
-        logger.error(f"Error generando contenido: {e}")
-        raise HTTPException(status_code=500, detail=f"Falla generando contenido: {str(e)}")
+@app.post("/api/articles/generate", dependencies=[Depends(verify_auth)], status_code=202)
+async def generate_article(payload: ArticleGenerateRequest | None = None):
+    """Escribe un artículo (es + en) en segundo plano y responde 202 con el id de la tarea.
 
-
-@app.get("/api/content/posts", dependencies=[Depends(verify_auth)])
-async def list_content_posts(
-    status: ContentPostStatus | None = None,
-    limit: int = Query(50, ge=1, le=100)
-):
-    """Lista las publicaciones creadas con opción de filtrado por estado."""
-    posts = await content_storage.list_posts(status=status, limit=limit)
-    return {"data": posts, "count": len(posts)}
-
-
-@app.get("/api/content/posts/{post_id}", dependencies=[Depends(verify_auth)])
-async def get_content_post(post_id: str):
-    """Devuelve una publicación por ID con todas sus plataformas y slides."""
-    post = await content_storage.get_post(post_id)
-    if not post:
-        raise HTTPException(status_code=404, detail="Publicación no encontrada")
-    return {"data": post}
-
-
-@app.patch("/api/content/posts/{post_id}/status", dependencies=[Depends(verify_auth)])
-async def update_content_post_status(post_id: str, body: ContentStatusUpdateRequest):
-    """Actualiza el estado de una publicación (draft, approved, published, rejected)."""
-    post = await content_storage.get_post(post_id)
-    if not post:
-        raise HTTPException(status_code=404, detail="Publicación no encontrada")
-
-    await content_storage.update_status(post_id, body.status)
-    return {"ok": True, "post_id": post_id, "new_status": body.status}
-
-
-PUBLISH_ERROR_STATUS = {
-    "not_found": 404,
-    "invalid_channel": 422,
-    "already_published": 409,
-    "rejected": 409,
-    "already_dispatched": 409,
-    "dispatch_failed": 502,
-    "dispatch_unknown": 504,
-}
-
-
-@app.post("/api/content/posts/{post_id}/publish", dependencies=[Depends(verify_auth)])
-async def publish_content_post(post_id: str, payload: ContentPublishRequest | None = None, force: bool = False):
-    """Despacha la publicación al webhook de contenido de n8n por el canal pedido.
-
-    Responde status="dispatched" (n8n la recibió) o "approved_local" (sin n8n). Queda
-    PUBLISHED recién cuando n8n confirma por /api/webhooks/n8n/callback.
+    Cuando termina, GET /api/tasks/{task_id} trae el artículo en `result`. Si ya hay uno
+    escribiéndose, devuelve esa tarea (already_running=true). Con trend_id, la tendencia
+    del Radar queda GENERATED al terminar. Eros nunca escribe en el portafolio.
     """
-    req = payload or ContentPublishRequest()
-    res = await content_dispatcher.publish_post(post_id, channel=req.channel, force=force)
-    if not res.get("ok"):
-        return error_response(PUBLISH_ERROR_STATUS.get(res.get("error_code", ""), 502), res)
-    return res
+    req = payload or ArticleGenerateRequest()
 
+    async def job() -> dict[str, Any]:
+        try:
+            article = await article_generator.generate(req)
+        except LLMUnavailableError as e:
+            raise TaskError(f"Gemini no está disponible: {e}", code="llm_unavailable") from e
+        except LLMOutputError as e:
+            raise TaskError(str(e), code="llm_output_invalid") from e
+        return article.model_dump()
 
-@app.delete("/api/content/posts/{post_id}", dependencies=[Depends(verify_auth)])
-async def delete_content_post(post_id: str):
-    """Elimina una publicación."""
-    post = await content_storage.get_post(post_id)
-    if not post:
-        raise HTTPException(status_code=404, detail="Publicación no encontrada")
-
-    await content_storage.delete_post(post_id)
-    return {"ok": True, "deleted": post_id}
-
-
-@app.get("/api/content/carousel/{post_id}/html", response_class=HTMLResponse, dependencies=[Depends(verify_auth)])
-async def get_carousel_html(post_id: str, auto_print: bool = False):
-    """Devuelve la vista interactiva e imprimible (Print to PDF de LinkedIn) de las diapositivas."""
-    post = await content_storage.get_post(post_id)
-    if not post:
-        raise HTTPException(status_code=404, detail="Publicación no encontrada")
-
-    html = CarouselRenderer.render_html(post, auto_print=auto_print)
-    return HTMLResponse(content=html, media_type="text/html")
-
-
-@app.post("/api/webhooks/n8n/callback", dependencies=[Depends(verify_webhook_auth)])
-async def n8n_callback(payload: dict[str, Any]):
-    """Webhook receptor de confirmación desde n8n cuando se ejecuta un workflow."""
-    """
-    Body: {post_id, status, channel?}.
-    - status="published": confirma ese canal (sin channel o "all": todos los despachados);
-      la publicación queda PUBLISHED cuando todos los canales despachados están confirmados.
-    - status="rejected" → REJECTED.
-    - status="failed"/"error": libera el canal para poder reintentar.
-    - Sin status (o desconocido): se ignora.
-    """
-    logger.info(f"Callback recibido desde n8n: post_id={payload.get('post_id')} status={payload.get('status')} channel={payload.get('channel')}")
-    post_id = payload.get("post_id")
-    status_str = str(payload.get("status") or "").lower()
-    channel = str(payload.get("channel") or "all").lower()
-    channels = None if channel == "all" else [channel]
-    new_status = None
-    if post_id:
-        details = json.dumps(payload.get("details", payload))
-        if status_str == "published":
-            new_status = await content_storage.confirm_published(post_id, channels, n8n_response=details)
-        elif status_str == "rejected":
-            await content_storage.update_status(post_id, ContentPostStatus.REJECTED, n8n_response=details)
-            new_status = ContentPostStatus.REJECTED
-        elif status_str in ("failed", "error"):
-            await content_storage.release_dispatch(post_id, channels or content_dispatcher.channels_for("all"), n8n_response=details)
-        else:
-            return {"ok": True, "received": True, "ignored": True}
-    return {"ok": True, "received": True, "status": new_status.value if new_status else None}
+    task, created = task_registry.start("article", job)
+    return _accepted(task, created)
 
 
 # ---------------------------------------------------------------------------
 # TrendRadar Endpoints (Eros Radar de Tendencias Técnicas)
+# Para escribir un artículo a partir de una tendencia: POST /api/articles/generate con trend_id.
 # ---------------------------------------------------------------------------
 
 @app.post("/api/radar/scan", dependencies=[Depends(verify_auth)], response_model=TrendScanResponse)
@@ -936,46 +798,3 @@ async def update_radar_trend_status(trend_id: str, payload: dict[str, Any]):
         raise HTTPException(status_code=400, detail=f"Estado inválido: {new_status}")
     ok = await radar_storage.update_status(trend_id, ts)
     return {"ok": ok, "id": trend_id, "status": ts.value}
-
-
-@app.post("/api/radar/trends/{trend_id}/generate", dependencies=[Depends(verify_auth)])
-async def generate_post_from_trend(trend_id: str, payload: TrendGenerateRequest | None = None):
-    """Genera una publicación omnicanal completa a partir de una tendencia detectada."""
-    trend = await radar_storage.get_trend(trend_id)
-    if not trend:
-        raise HTTPException(status_code=404, detail="Tendencia no encontrada")
-
-    req = payload or TrendGenerateRequest()
-    angle = req.custom_angle or trend.engineering_angle
-
-    # La URL, la síntesis, el ángulo y los puntos llegan al prompt como instrucciones del autor
-    parts = [
-        f"Referencia original: {trend.url}",
-        f"Síntesis: {trend.summary}",
-        f"Ángulo de ingeniería: {angle}",
-    ]
-    points = [p.strip() for p in req.key_points if p and p.strip()]
-    if points:
-        parts.append("Puntos clave:\n" + "\n".join(f"- {p}" for p in points))
-    if req.custom_instructions and req.custom_instructions.strip():
-        parts.append(req.custom_instructions.strip())
-
-    gen_req = ContentGenerateRequest(
-        topic=trend.title,
-        project_slug=req.project_slug,
-        pillar=req.pillar,
-        custom_instructions="\n\n".join(parts),
-    )
-
-    try:
-        post = await content_generator.generate_post(gen_req)
-    except (LLMUnavailableError, LLMOutputError) as e:
-        raise llm_http_error(e)
-    await radar_storage.update_status(trend_id, TrendStatus.GENERATED, post_id=post.id)
-    return {
-        "ok": True,
-        "trend_id": trend_id,
-        "post": post.model_dump(),
-    }
-
-

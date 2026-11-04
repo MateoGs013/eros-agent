@@ -201,7 +201,6 @@ class TestJobApplicationDispatcher(unittest.IsolatedAsyncioTestCase):
 
         # Sin proveedor configurado: no se envía, no se registra, no hay POST a una URL vacía
         self.dispatcher.settings.n8n_application_webhook_url = ""
-        self.dispatcher.settings.n8n_webhook_url = "https://n8n.example.com/webhook/eros-content"
         self.dispatcher.settings.smtp_host = ""
         with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_http:
             for channel in ("auto", "n8n", "smtp"):
@@ -214,7 +213,7 @@ class TestJobApplicationDispatcher(unittest.IsolatedAsyncioTestCase):
                 )
                 self.assertFalse(result["ok"])
                 self.assertEqual(result["error_code"], "no_provider")
-            # Nunca cae al webhook de contenido
+            # Ningún POST a ningún lado
             mock_http.assert_not_called()
 
         saved = await self.storage.get_job("job-email-4")

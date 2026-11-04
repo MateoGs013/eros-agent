@@ -1,7 +1,5 @@
 from enum import Enum
-from typing import Any
-from pydantic import BaseModel, Field, field_validator
-from eros.content.models import ContentPillar
+from pydantic import BaseModel, Field
 
 
 class TrendSource(str, Enum):
@@ -13,6 +11,7 @@ class TrendSource(str, Enum):
 
 class TrendStatus(str, Enum):
     DISCOVERED = "DISCOVERED"
+    # Ya se escribió un artículo a partir de esta tendencia (POST /api/articles/generate con trend_id)
     GENERATED = "GENERATED"
     DISCARDED = "DISCARDED"
 
@@ -28,6 +27,7 @@ class TrendItem(BaseModel):
     tags: list[str] = Field(default_factory=list)
     detected_at: str
     status: TrendStatus = TrendStatus.DISCOVERED
+    # Post de la vieja publicación omnicanal: solo lo tienen tendencias anteriores a los artículos
     post_id: str | None = None
 
 
@@ -35,19 +35,3 @@ class TrendScanResponse(BaseModel):
     total_found: int
     new_trends: int
     trends: list[TrendItem]
-
-
-class TrendGenerateRequest(BaseModel):
-    pillar: ContentPillar = ContentPillar.ARCHITECTURE
-    project_slug: str | None = None
-    custom_angle: str | None = None
-    key_points: list[str] = Field(default_factory=list)
-    custom_instructions: str | None = None
-
-    @field_validator("pillar", mode="before")
-    @classmethod
-    def default_pillar(cls, v: Any) -> Any:
-        # null o vacío → enfoque por defecto; acepta mayúsculas ("ARCHITECTURE")
-        if v is None or (isinstance(v, str) and not v.strip()):
-            return ContentPillar.ARCHITECTURE
-        return v.strip().lower() if isinstance(v, str) else v

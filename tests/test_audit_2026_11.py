@@ -1,7 +1,8 @@
 """Tests de los arreglos de la auditoría del 2-nov-2026 (docs/auditoria-eros.md del portfolio).
 
 Cubren: correos nunca adivinados, envío idempotente, escaneo que no borra historial,
-modo sin IA que no inventa, publicación por canal, Radar → post y escaneo asincrónico.
+modo sin IA que no inventa, Radar → artículo y escaneo asincrónico. La publicación en
+LinkedIn/X se quitó: los tests de canales se reemplazaron por los de rutas que ya no existen.
 Ninguno sale a la red: todo lo externo está simulado.
 """
 
@@ -17,9 +18,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 
 from eros.config import Settings, get_settings
-from eros.content.dispatcher import ContentDispatcher
-from eros.content.models import ContentPillar, ContentPost, ContentPostStatus, DevToArticle
-from eros.content.storage import ContentStorage
 from eros.db.storage import JobStorage
 from eros.hunter.cv_generator import CVGenerator
 from eros.hunter.dispatcher import JobApplicationDispatcher
@@ -27,7 +25,7 @@ from eros.hunter.engine import HunterEngine, ScanInProgressError
 from eros.hunter.normalize import job_dedup_key
 from eros.integrations.llm import LLMClient, LLMOutputError, LLMUnavailableError
 from eros.models import JobOffer, JobStatus, MatchResult, ProfileContext
-from eros.radar.models import TrendGenerateRequest, TrendItem, TrendSource, TrendStatus
+from eros.radar.models import TrendItem, TrendSource, TrendStatus
 from eros.radar.storage import RadarStorage
 
 API_KEY = "eros_audit_test_key_0123456789"
@@ -84,7 +82,6 @@ class TestIdempotentDispatch(_TempDbCase):
         self.dispatcher.settings = Settings(
             database_path=self.db_path,
             n8n_application_webhook_url="https://n8n.example/webhook/apply",
-            n8n_webhook_url="https://n8n.example/webhook/eros-content",
             n8n_webhook_secret="n8n-shared-secret",
         )
         job = qualified_job("job-send-1", pitch_draft='{"cover_letter": "Hola."}')
@@ -163,7 +160,7 @@ class TestIdempotentDispatch(_TempDbCase):
             res = await self._send()
         self.assertTrue(res["ok"])
 
-    async def test_no_provider_never_registers_or_falls_back_to_content_webhook(self):
+    async def test_no_provider_never_registers(self):
         self.dispatcher.settings.n8n_application_webhook_url = ""
         with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as post:
             res = await self._send(channel="n8n")
@@ -333,7 +330,7 @@ class TestHeuristicModeDoesNotInvent(_TempDbCase):
         with self.assertRaises(LLMUnavailableError):
             await llm.generate("Generá el JSON del CV adaptado")
         with self.assertRaises(LLMUnavailableError):
-            await llm.generate('{"carousel_slides": [], "linkedin_post": ""}', json_mode=True)
+            await llm.generate('{"title": "", "markdown": ""}', json_mode=True)
         with self.assertRaises(LLMUnavailableError):
             await llm.generate("REDACTÁ UNA PROPUESTA elevator_pitch")
         data = json.loads(await llm.generate("EVALUÁ ESTA OFERTA LABORAL:\nTítulo: Dev", allow_heuristic=True))
@@ -378,7 +375,7 @@ class TestHeuristicModeDoesNotInvent(_TempDbCase):
             self.assertNotIn("PRO_HEURISTICO", prompt)
 
     async def test_api_returns_clear_errors_without_ai(self):
-        from eros.api import app, engine as api_engine, content_generator
+        from eros.api import app, engine as api_engine
 
         os.environ["EROS_API_KEY"] = API_KEY
         get_settings.cache_clear()
@@ -390,133 +387,24 @@ class TestHeuristicModeDoesNotInvent(_TempDbCase):
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
             with patch.object(api_engine.cv_gen.llm, "generate", unavailable), \
-                 patch.object(api_engine.pitch_gen.llm, "generate", unavailable), \
-                 patch.object(content_generator.llm, "generate", unavailable):
+                 patch.object(api_engine.pitch_gen.llm, "generate", unavailable):
                 r_cv = await client.post("/api/cv/job-api-noai", headers=AUTH)
                 r_pitch = await client.post("/api/pitch/job-api-noai", headers=AUTH)
-                r_post = await client.post("/api/content/generate", json={"topic": "SSR"}, headers=AUTH)
-        for r in (r_cv, r_pitch, r_post):
+        for r in (r_cv, r_pitch):
             self.assertEqual(r.status_code, 503, r.text)
             self.assertIn("IA no disponible", r.json()["detail"])
 
-    def test_content_prompt_forbids_invented_metrics(self):
-        from eros.content.generator import SYSTEM_PROMPT
-        self.assertIn("NUNCA inventes", SYSTEM_PROMPT)
-        self.assertNotIn("-65% Latencia", SYSTEM_PROMPT)
+    def test_article_prompt_forbids_invented_metrics(self):
+        from eros.content.article import SYSTEM_PROMPT_ES
+        self.assertIn("NUNCA inventes", SYSTEM_PROMPT_ES)
+        self.assertNotIn("-65% Latencia", SYSTEM_PROMPT_ES)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# F4 / E5 / S2: publicación por canal
+# F1: Radar → artículo (antes Radar → post omnicanal)
 # ──────────────────────────────────────────────────────────────────────────────
 
-class TestContentPublishing(unittest.IsolatedAsyncioTestCase):
-    async def asyncSetUp(self):
-        self.tmp = tempfile.mkdtemp()
-        self.storage = ContentStorage(db_path=os.path.join(self.tmp, "content.db"))
-        await self.storage.init_db()
-        self.post = ContentPost(
-            id="post-1", title="T", topic="T", pillar=ContentPillar.ARCHITECTURE, hook="Hook",
-            linkedin_text="Texto LinkedIn", first_comment="Comentario", twitter_thread=["1/2 a", "2/2 b"],
-            devto=DevToArticle(title="D", tags=["x"], markdown_body="# D"),
-        )
-        await self.storage.save_post(self.post)
-        self.dispatcher = ContentDispatcher(storage=self.storage)
-        self.dispatcher.settings = Settings(
-            n8n_webhook_url="https://n8n.example/webhook/eros-content",
-            n8n_webhook_secret="n8n-shared-secret",
-        )
-
-    async def asyncTearDown(self):
-        shutil.rmtree(self.tmp, ignore_errors=True)
-
-    async def test_channel_is_respected_and_published_only_by_callback(self):
-        ok = MagicMock(status_code=200, text="queued")
-        with patch("httpx.AsyncClient.post", new_callable=AsyncMock, return_value=ok) as post:
-            res = await self.dispatcher.publish_post("post-1", channel="linkedin")
-        self.assertTrue(res["ok"])
-        self.assertEqual(res["status"], "dispatched")
-        payload = post.call_args.kwargs["json"]
-        headers = post.call_args.kwargs["headers"]
-        self.assertEqual(payload["channel"], "linkedin")
-        self.assertEqual(payload["linkedin_post"], "Texto LinkedIn")
-        self.assertEqual(payload["twitter_thread"], [])
-        self.assertIsNone(payload["devto_article"])
-        self.assertEqual(headers["X-N8N-Secret"], "n8n-shared-secret")
-
-        saved = await self.storage.get_post("post-1")
-        self.assertEqual(saved.status, ContentPostStatus.APPROVED)
-        self.assertEqual(saved.dispatched_channels, ["linkedin"])
-
-        # El mismo canal no se despacha dos veces; otro canal sí
-        with patch("httpx.AsyncClient.post", new_callable=AsyncMock, return_value=ok) as post2:
-            again = await self.dispatcher.publish_post("post-1", channel="linkedin")
-            post2.assert_not_called()
-        self.assertEqual(again["error_code"], "already_dispatched")
-        with patch("httpx.AsyncClient.post", new_callable=AsyncMock, return_value=ok):
-            res_x = await self.dispatcher.publish_post("post-1", channel="twitter")
-        self.assertTrue(res_x["ok"])
-
-        # n8n confirma canal por canal: PUBLISHED recién cuando están los dos
-        status = await self.storage.confirm_published("post-1", ["linkedin"])
-        self.assertEqual(status, ContentPostStatus.APPROVED)
-        status = await self.storage.confirm_published("post-1", ["twitter"])
-        self.assertEqual(status, ContentPostStatus.PUBLISHED)
-
-        # Un canal publicado no se republica (ni con force); Dev.to no tiene publicación automática
-        with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as post3:
-            res = await self.dispatcher.publish_post("post-1", channel="linkedin", force=True)
-            res_all = await self.dispatcher.publish_post("post-1", channel="all")
-            res_devto = await self.dispatcher.publish_post("post-1", channel="devto")
-            post3.assert_not_called()
-        self.assertEqual(res["error_code"], "already_published")
-        self.assertEqual(res_all["error_code"], "already_published")
-        self.assertEqual(res_devto["error_code"], "invalid_channel")
-
-    async def test_failed_channel_callback_keeps_other_channel_and_allows_retry(self):
-        ok = MagicMock(status_code=200, text="queued")
-        with patch("httpx.AsyncClient.post", new_callable=AsyncMock, return_value=ok):
-            res = await self.dispatcher.publish_post("post-1", channel="all")
-        self.assertEqual(res["dispatched_channels"], ["linkedin", "twitter"])
-
-        await self.storage.confirm_published("post-1", ["linkedin"])
-        await self.storage.release_dispatch("post-1", ["twitter"])
-        saved = await self.storage.get_post("post-1")
-        self.assertEqual(saved.status, ContentPostStatus.APPROVED)
-        self.assertEqual(saved.published_channels, ["linkedin"])
-        self.assertEqual(saved.dispatched_channels, ["linkedin"])
-
-        with patch("httpx.AsyncClient.post", new_callable=AsyncMock, return_value=ok) as retry:
-            res = await self.dispatcher.publish_post("post-1", channel="twitter")
-            retry.assert_called_once()
-        self.assertTrue(res["ok"])
-        status = await self.storage.confirm_published("post-1", ["twitter"])
-        self.assertEqual(status, ContentPostStatus.PUBLISHED)
-
-    async def test_failed_dispatch_releases_channel(self):
-        bad = MagicMock(status_code=500, text="boom")
-        with patch("httpx.AsyncClient.post", new_callable=AsyncMock, return_value=bad):
-            res = await self.dispatcher.publish_post("post-1", channel="all")
-        self.assertEqual(res["error_code"], "dispatch_failed")
-        saved = await self.storage.get_post("post-1")
-        self.assertEqual(saved.dispatched_channels, [])
-
-    async def test_invalid_channel(self):
-        res = await self.dispatcher.publish_post("post-1", channel="instagram")
-        self.assertEqual(res["error_code"], "invalid_channel")
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# F1: Radar → post
-# ──────────────────────────────────────────────────────────────────────────────
-
-class TestRadarToPost(unittest.IsolatedAsyncioTestCase):
-    def test_default_and_legacy_pillars(self):
-        self.assertEqual(TrendGenerateRequest().pillar, ContentPillar.ARCHITECTURE)
-        self.assertEqual(TrendGenerateRequest(pillar=None).pillar, ContentPillar.ARCHITECTURE)
-        self.assertEqual(TrendGenerateRequest(pillar="AI_AGENT_OPS").pillar, ContentPillar.AI_AGENT_OPS)
-        with self.assertRaises(Exception):
-            TrendGenerateRequest(pillar="TECHNICAL_BREAKDOWN")
-
+class TestRadarToArticle(unittest.IsolatedAsyncioTestCase):
     async def test_rescan_keeps_generated_status(self):
         tmp = tempfile.mkdtemp()
         try:
@@ -533,33 +421,54 @@ class TestRadarToPost(unittest.IsolatedAsyncioTestCase):
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
-    async def test_generate_passes_points_url_and_angle(self):
-        from eros.api import app, radar_storage, content_generator
+    async def test_article_from_trend_passes_url_angle_and_marks_generated(self):
+        from eros.api import app, article_generator, engine as api_engine, radar_storage
+        from test_articles import english_json, spanish_json
 
         os.environ["EROS_API_KEY"] = API_KEY
         get_settings.cache_clear()
+        await api_engine.storage.init_db()
+        await api_engine.storage.save_profile_cache(ProfileContext())
         await radar_storage.init_db()
         await radar_storage.save_trend(TrendItem(
             id="t-api", title="Postgres 18", url="https://hn.example/pg18", source=TrendSource.HACKER_NEWS,
             summary="Novedades de Postgres 18", relevance_score=90, engineering_angle="Ángulo base", detected_at="2026-11-01",
         ))
-        fake_post = MagicMock(id="post-radar-1")
-        fake_post.model_dump.return_value = {"id": "post-radar-1"}
-        gen = AsyncMock(return_value=fake_post)
+        llm = AsyncMock(side_effect=[spanish_json(), english_json()])
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-            with patch.object(content_generator, "generate_post", gen):
-                r = await client.post(
-                    "/api/radar/trends/t-api/generate",
-                    json={"pillar": None, "custom_angle": "Mi ángulo", "key_points": ["Punto A", "Punto B"]},
-                    headers=AUTH,
-                )
-        self.assertEqual(r.status_code, 200, r.text)
-        req = gen.call_args.args[0]
-        self.assertEqual(req.pillar, ContentPillar.ARCHITECTURE)
-        for expected in ("https://hn.example/pg18", "Mi ángulo", "Punto A", "Punto B", "Novedades de Postgres 18"):
-            self.assertIn(expected, req.custom_instructions)
+            with patch.object(article_generator.llm, "generate", llm):
+                r = await client.post("/api/articles/generate", json={"trend_id": "t-api", "angle": "Mi ángulo"}, headers=AUTH)
+                self.assertEqual(r.status_code, 202, r.text)
+                for _ in range(100):
+                    task = (await client.get(r.json()["status_url"], headers=AUTH)).json()
+                    if task["status"] != "running":
+                        break
+                    await asyncio.sleep(0.02)
+        self.assertEqual(task["status"], "done", task)
+        self.assertEqual(task["result"]["trend_id"], "t-api")
+        prompt = llm.call_args_list[0].kwargs["prompt"]
+        for expected in ("https://hn.example/pg18", "Mi ángulo", "Ángulo base", "Novedades de Postgres 18"):
+            self.assertIn(expected, prompt)
         self.assertEqual((await radar_storage.get_trend("t-api")).status, TrendStatus.GENERATED)
+
+    async def test_social_publishing_routes_are_gone(self):
+        from eros.api import app
+
+        os.environ["EROS_API_KEY"] = API_KEY
+        get_settings.cache_clear()
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            gone = [
+                await client.post("/api/content/generate", json={"topic": "SSR"}, headers=AUTH),
+                await client.get("/api/content/posts", headers=AUTH),
+                await client.post("/api/content/posts/post-1/publish", headers=AUTH),
+                await client.get("/api/content/carousel/post-1/html", headers=AUTH),
+                await client.post("/api/webhooks/n8n/callback", json={"post_id": "post-1", "status": "published"}),
+                await client.post("/api/radar/trends/t1/generate", json={}, headers=AUTH),
+            ]
+        for r in gone:
+            self.assertEqual(r.status_code, 404, f"{r.request.method} {r.request.url.path} sigue existiendo")
 
 
 # ──────────────────────────────────────────────────────────────────────────────
