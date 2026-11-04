@@ -13,6 +13,7 @@ import httpx
 
 from eros.config import get_settings
 from eros.content.article import (
+    ARTICLE_MAX_TOKENS,
     count_words,
     normalize_markdown,
     normalize_tags,
@@ -262,7 +263,7 @@ class TestArticlesApi(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(llm.call_count, 2)
         es_call, en_call = llm.call_args_list
-        self.assertEqual(es_call.kwargs["max_tokens"], 8192)
+        self.assertEqual(es_call.kwargs["max_tokens"], ARTICLE_MAX_TOKENS)
         self.assertEqual(es_call.kwargs["timeout"], 150.0)
         self.assertTrue(es_call.kwargs["json_mode"])
         self.assertIn("NUNCA inventes", es_call.kwargs["system_prompt"])

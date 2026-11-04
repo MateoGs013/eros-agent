@@ -29,8 +29,9 @@ from eros.radar.storage import RadarStorage
 
 logger = logging.getLogger(__name__)
 
-# Un artículo de 1500 palabras más el JSON no entra en los 4096 tokens ni en los 45 s de siempre
-ARTICLE_MAX_TOKENS = 8192
+# Un artículo de 1500 palabras más el JSON no entra en los 4096 tokens ni en los 45 s de siempre.
+# Los modelos flash que razonan descuentan ese razonamiento del mismo tope, por eso sobra margen.
+ARTICLE_MAX_TOKENS = 16384
 ARTICLE_TIMEOUT = 150.0
 
 MIN_WORDS_ES = 500
