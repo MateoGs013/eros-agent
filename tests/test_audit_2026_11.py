@@ -330,7 +330,7 @@ class TestHeuristicModeDoesNotInvent(_TempDbCase):
         with self.assertRaises(LLMUnavailableError):
             await llm.generate("Generá el JSON del CV adaptado")
         with self.assertRaises(LLMUnavailableError):
-            await llm.generate('{"carousel_slides": [], "linkedin_post": ""}', json_mode=True)
+            await llm.generate('{"title": "", "markdown": ""}', json_mode=True)
         with self.assertRaises(LLMUnavailableError):
             await llm.generate("REDACTÁ UNA PROPUESTA elevator_pitch")
         data = json.loads(await llm.generate("EVALUÁ ESTA OFERTA LABORAL:\nTítulo: Dev", allow_heuristic=True))
