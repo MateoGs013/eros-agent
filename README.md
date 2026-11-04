@@ -28,7 +28,7 @@ Sistema multiagente autónomo personal para **búsqueda de empleo tech** (remoto
 - **Pitches y Cover Letters:** Redacción instantánea de propuestas adaptadas.
 
 ### 3. ⚡ n8n: escaneo diario y postulaciones
-- **Escaneo diario:** el workflow de `n8n/` (`Eros · Búsqueda diaria de vacantes`) corre a las 08:00 y 18:00 y llama a `POST /api/scan?evaluate=true` con la credencial *Header Auth* `n8n → Eros` (`Authorization` = `Bearer <EROS_API_KEY>`). No lee `$env` (n8n 2.x lo bloquea en los nodos por defecto): falta asignarle la credencial al importarlo.
+- **Escaneo diario:** el workflow de `n8n/` (`Eros · Búsqueda diaria de vacantes`) corre a las 08:00 y 18:00 y llama a `POST /api/scan?evaluate=true&notify=true` (las vacantes desde `MATCH_MIN_SCORE` llegan por Telegram) con la credencial *Header Auth* `n8n → Eros` (`Authorization` = `Bearer <EROS_API_KEY>`). No lee `$env` (n8n 2.x lo bloquea en los nodos por defecto): falta asignarle la credencial al importarlo.
 - **Postulaciones por correo (opcional):** si está `N8N_APPLICATION_WEBHOOK_URL`, Eros manda ahí cada postulación con `N8N_WEBHOOK_SECRET` en el header `X-N8N-Secret`. Ese webhook no está en el workflow de `n8n/`: es el que tengas armado para mandar los correos (por ejemplo con Gmail), y **tiene que validarlo** con *Authentication → Header Auth* (credencial `Eros → n8n`, `X-N8N-Secret` = el mismo valor). Sin esa URL, Eros usa SMTP; sin ninguno de los dos, no envía.
 
 ### 4. 🤖 Centro de Control por Telegram (`TelegramBot`)
@@ -89,7 +89,7 @@ Las tareas viven en memoria: si Eros se reinicia, `GET /api/tasks/{id}` responde
 |---|---|---|
 | `POST` | `/api/articles/generate` | **202** con `task_id`: escribe un artículo para el portafolio (ver arriba). |
 | `GET` | `/api/jobs` | Lista de ofertas (incluye `contact_email_source`, `scored_by`, `send_state`). |
-| `POST` | `/api/scan` | **202** con `task_id`: escanea en segundo plano. Un segundo pedido mientras corre devuelve la misma tarea (`already_running: true`). |
+| `POST` | `/api/scan` | **202** con `task_id`: escanea en segundo plano. Un segundo pedido mientras corre devuelve la misma tarea (`already_running: true`). `?evaluate=true` evalúa las nuevas y `&notify=true` avisa por Telegram las que pasan `MATCH_MIN_SCORE`. |
 | `POST` | `/api/evaluate` | **202** con `task_id`: evalúa pendientes en segundo plano. |
 | `GET` | `/api/tasks/{task_id}` | Estado de la tarea: `running`, `done` (con `result`) o `failed` (con `error` y `error_code`). |
 | `POST` | `/api/purge` | Marca como descartadas (sin borrar) las incompatibles. Nunca toca las postuladas. |

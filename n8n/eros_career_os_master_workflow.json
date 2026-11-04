@@ -24,7 +24,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "https://eros.mateogs.tech/api/scan?evaluate=true",
+        "url": "https://eros.mateogs.tech/api/scan?evaluate=true&notify=true",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
         "options": {}

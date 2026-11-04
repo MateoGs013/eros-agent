@@ -514,6 +514,34 @@ class TestAsyncScanAndOps(unittest.IsolatedAsyncioTestCase):
             missing = await client.get("/api/tasks/scan_nope", headers=AUTH)
             self.assertEqual(missing.status_code, 404)
 
+    async def test_scan_notify_avisa_solo_los_buenos_por_telegram(self):
+        from eros.api import app, engine as api_engine, telegram_bot
+        from eros.models import MatchResult
+
+        good = (qualified_job("notify-good", company="Buena"), MatchResult(score=99, verdict="EXCELENTE_MATCH", summary="Encaja."))
+        weak = (qualified_job("notify-weak", company="Floja"), MatchResult(score=1, verdict="DESCARTAR", summary="No encaja."))
+
+        async def finished(task_url, client):
+            for _ in range(50):
+                done = await client.get(task_url, headers=AUTH)
+                if done.json()["status"] != "running":
+                    return done.json()
+                await asyncio.sleep(0.05)
+            self.fail("la tarea no terminó")
+
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            with patch.object(api_engine, "run_scan", AsyncMock(return_value={"total_found": 2, "new_jobs": 2})), \
+                 patch.object(api_engine, "evaluate_pending_jobs", AsyncMock(return_value=[good, weak])), \
+                 patch.object(telegram_bot, "notify_match", AsyncMock(return_value=True)) as notify:
+                quiet = await finished((await client.post("/api/scan?evaluate=true", headers=AUTH)).json()["status_url"], client)
+                self.assertNotIn("notified_count", quiet["result"])
+                notify.assert_not_awaited()
+
+                loud = await finished((await client.post("/api/scan?evaluate=true&notify=true", headers=AUTH)).json()["status_url"], client)
+                self.assertEqual(loud["result"]["notified_count"], 1)
+                notify.assert_awaited_once_with(*good)
+
     async def test_stats_count_each_job_once(self):
         from eros.api import app, engine as api_engine
 

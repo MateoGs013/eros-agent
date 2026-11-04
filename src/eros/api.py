@@ -435,6 +435,16 @@ def _evaluation_summary(eval_res: list) -> dict[str, Any]:
     }
 
 
+async def _notify_matches(evaluated: list) -> int:
+    """Avisa por Telegram las vacantes evaluadas con puntaje suficiente; devuelve cuántas salieron."""
+    min_score = get_settings().match_min_score
+    sent = 0
+    for job, match in evaluated:
+        if match.score >= min_score and await telegram_bot.notify_match(job, match):
+            sent += 1
+    return sent
+
+
 def _accepted(task: dict[str, Any], created: bool) -> JSONResponse:
     return JSONResponse(status_code=202, content={
         "ok": True,
@@ -448,12 +458,14 @@ def _accepted(task: dict[str, Any], created: bool) -> JSONResponse:
 
 
 @app.post("/api/scan", dependencies=[Depends(verify_auth)], status_code=202)
-async def trigger_scan(evaluate: bool = False, background_eval: bool = False):
+async def trigger_scan(evaluate: bool = False, background_eval: bool = False, notify: bool = False):
     """Dispara un escaneo en segundo plano y responde 202 con el id de la tarea.
 
     El estado se consulta en GET /api/tasks/{task_id}. Si ya hay un escaneo corriendo,
     devuelve el de ese (already_running=true) en vez de arrancar otro.
     evaluate=true (o background_eval=true con auto_evaluate activo) evalúa las nuevas al terminar.
+    notify=true avisa por Telegram las evaluadas con puntaje desde MATCH_MIN_SCORE (lo usa el cron
+    diario de n8n; «Buscar vacantes» del admin no lo pide).
     """
     if engine.scan_in_progress and not task_registry.running("scan"):
         raise HTTPException(status_code=409, detail="Ya hay un escaneo en curso (iniciado por Telegram o el escaneo periódico).")
@@ -468,7 +480,10 @@ async def trigger_scan(evaluate: bool = False, background_eval: bool = False):
             if engine.evaluation_in_progress:
                 summary["evaluation_skipped"] = "Ya había una evaluación en curso."
             else:
-                summary.update(_evaluation_summary(await engine.evaluate_pending_jobs(limit=await _eval_limit())))
+                evaluated = await engine.evaluate_pending_jobs(limit=await _eval_limit())
+                summary.update(_evaluation_summary(evaluated))
+                if notify:
+                    summary["notified_count"] = await _notify_matches(evaluated)
         return summary
 
     task, created = task_registry.start("scan", job)
