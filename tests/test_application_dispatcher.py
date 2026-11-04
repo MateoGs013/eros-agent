@@ -11,6 +11,7 @@ from eros.db.storage import JobStorage
 from eros.hunter.filters import extract_contact_email
 from eros.hunter.dispatcher import JobApplicationDispatcher
 from eros.config import Settings
+from portfolio_cv import PORTFOLIO_FILENAME, PORTFOLIO_PDF, PORTFOLIO_TEXT, portfolio_cv
 
 
 class TestJobApplicationDispatcher(unittest.IsolatedAsyncioTestCase):
@@ -106,7 +107,11 @@ class TestJobApplicationDispatcher(unittest.IsolatedAsyncioTestCase):
         preview = await self.dispatcher.get_application_preview("job-email-2")
         self.assertTrue(preview["ok"])
         self.assertEqual(preview["contact_email"], "recruiting@acme.corp")
-        self.assertEqual(preview["cv_filename"], "CV_Mateo_Sonzogni.pdf")
+        # El PDF lo manda el portafolio al enviar: la vista previa no nombra ni enlaza un CV de Eros.
+        self.assertEqual(preview["cv_source"], "portfolio")
+        self.assertIsNone(preview["cv_filename"])
+        self.assertIsNone(preview["cv_html_url"])
+        self.assertNotIn("/api/cv/", preview["body"])
         self.assertTrue(preview.get("has_pdf_attachment"))
         self.assertIn("Mateo", preview["subject"])
         self.assertIn("Acme", preview["body"])
@@ -152,7 +157,8 @@ class TestJobApplicationDispatcher(unittest.IsolatedAsyncioTestCase):
                 to_email="rrhh@initech.com",
                 custom_subject="Postulacion a Python Developer",
                 custom_body="Presento mi candidatura para la vacante de Python Developer.",
-                channel="n8n"
+                channel="n8n",
+                cv=portfolio_cv(),
             )
 
             self.assertTrue(result["ok"])
@@ -165,11 +171,14 @@ class TestJobApplicationDispatcher(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(called_payload["idempotency_key"], "apply-job-email-3")
             self.assertEqual(called_payload["event"], "job.application")
             self.assertEqual(called_payload["recipient_email"], "rrhh@initech.com")
-            self.assertEqual(called_payload["cv_filename"], "CV_Mateo_Sonzogni.pdf")
-            self.assertIn("cv_pdf_base64", called_payload)
-            self.assertTrue(len(called_payload["cv_pdf_base64"]) > 0)
-            decoded_pdf = base64.b64decode(called_payload["cv_pdf_base64"])
-            self.assertTrue(decoded_pdf.startswith(b"%PDF"))
+            # El adjunto es exactamente el CV del portafolio: mismos bytes, nombre y texto; nada de Eros.
+            self.assertEqual(called_payload["cv_filename"], PORTFOLIO_FILENAME)
+            self.assertEqual(base64.b64decode(called_payload["cv_pdf_base64"]), PORTFOLIO_PDF)
+            self.assertEqual(called_payload["cv_text"], PORTFOLIO_TEXT)
+            self.assertEqual(called_payload["cv_lang"], "es")
+            self.assertIsNone(called_payload["cv_data"])
+            self.assertIsNone(called_payload["cv_html_url"])
+            self.assertEqual(result["cv_filename"], PORTFOLIO_FILENAME)
 
         # Verify job marked as applied
         applied_job = await self.storage.get_job("job-email-3")
@@ -267,6 +276,7 @@ class TestJobApplicationDispatcher(unittest.IsolatedAsyncioTestCase):
                 to_email="hiring@globex.com",
                 confirmed=True,
                 channel="smtp",
+                cv=portfolio_cv(),
             )
             self.assertTrue(res["ok"])
             self.assertEqual(res["provider"], "smtp")
@@ -281,10 +291,9 @@ class TestJobApplicationDispatcher(unittest.IsolatedAsyncioTestCase):
             attachments = [p for p in parsed.walk() if p.get_content_disposition() == "attachment"]
             self.assertEqual(len(attachments), 1)
             pdf_part = attachments[0]
-            self.assertEqual(pdf_part.get_filename(), "CV_Mateo_Sonzogni.pdf")
+            self.assertEqual(pdf_part.get_filename(), PORTFOLIO_FILENAME)
             self.assertEqual(pdf_part.get_content_type(), "application/pdf")
-            decoded_pdf = pdf_part.get_payload(decode=True)
-            self.assertTrue(decoded_pdf.startswith(b"%PDF"))
+            self.assertEqual(pdf_part.get_payload(decode=True), PORTFOLIO_PDF)
 
             # Verificar cuerpo de texto y links
             text_parts = [p for p in parsed.walk() if p.get_content_type() == "text/plain"]
