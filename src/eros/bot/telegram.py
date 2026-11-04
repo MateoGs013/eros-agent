@@ -165,7 +165,7 @@ class TelegramBot:
             if not self.allowed_user_id or user_id != self.allowed_user_id:
                 logger.warning(f"Intento de acceso rechazado desde usuario ID {user_id}. TELEGRAM_ALLOWED_USER_ID={self.allowed_user_id}")
                 if chat_id and not self.allowed_user_id:
-                    await self._send_message(chat_id, f"Bot configurado en modo seguro. Para autorizar tu cuenta, definí TELEGRAM_ALLOWED_USER_ID={user_id} en tu archivo .env.")
+                    await self.send_message(chat_id, f"Bot configurado en modo seguro. Para autorizar tu cuenta, definí TELEGRAM_ALLOWED_USER_ID={user_id} en tu archivo .env.")
                 return
 
             await self._handle_command(chat_id, text, user_id)
