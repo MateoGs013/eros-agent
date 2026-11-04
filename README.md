@@ -1,58 +1,85 @@
-# Eros Career OS — Autonomous Job Hunter, CV Matcher & Content Engine
+# Eros Career OS — Autonomous Job Hunter, CV Matcher & Portfolio Writer
 
-Sistema multiagente autónomo personal para **búsqueda de empleo tech** (remoto USD / LATAM) y **creación de contenido técnico omnicanal** (LinkedIn, X/Twitter, Dev.to, Carousels PDF). Diseñado para operar 100% dentro del nivel gratuito de Google Gemini Free Tier ($0 de coste operativo) y distribuirse mediante **n8n** en tu propio VPS con Coolify.
+Sistema multiagente autónomo personal para **búsqueda de empleo tech** (remoto USD / LATAM) y **artículos técnicos para el portafolio** (mateogs.tech, en español y en inglés). Diseñado para operar 100% dentro del nivel gratuito de Google Gemini Free Tier ($0 de coste operativo), en tu propio VPS con Coolify; **n8n** solo dispara el escaneo diario de vacantes.
 
 ## Reglas que Eros respeta (auditoría 2-nov-2026)
 
 - **Correos reales o ninguno.** Eros nunca arma una dirección (`jobs@empresa.com`). Cada correo guarda su fuente en `contact_email_source`: `posting` (publicado en el aviso), `company_site` (en el sitio de la empresa, mismo dominio), `hunter` (Hunter.io), `manual` (escrito a mano) o `unknown` (heredado, sin fuente: hay que escribir la dirección para enviar). De un nombre genérico ("Empresa Confidencial") no se infiere ningún dominio.
 - **Una postulación se envía una sola vez.** Antes de enviar, Eros marca la vacante como «enviando» de forma atómica; manda `Idempotency-Key: apply-<job_id>` a n8n. Si el envío se corta, la vacante queda en `send_state: "unknown"` y no se reenvía sin `force_retry`. Sin proveedor (n8n de postulaciones o SMTP) no se envía ni se marca como postulada.
 - **El escaneo no borra historial.** Lo descartado y lo postulado se conservan; lo borrado a mano se recuerda (`seen_jobs`) para que no vuelva como nuevo. La misma vacante en dos fuentes (empresa + título normalizados) se guarda una vez.
-- **Sin IA no se inventa.** Sin Gemini/Claude, la evaluación de vacantes usa una estimación heurística marcada `scored_by: "heuristic"` que nunca deja una vacante en `saved` ni escribe notas de conexión. CV, pitch y posts fallan con 503 (`IA no disponible`) en vez de rellenar texto.
-- **Publicar respeta el canal** y queda `published` recién cuando n8n confirma por el callback.
+- **Sin IA no se inventa.** Sin Gemini/Claude, la evaluación de vacantes usa una estimación heurística marcada `scored_by: "heuristic"` que nunca deja una vacante en `saved` ni escribe notas de conexión. CV y pitch fallan con 503 (`IA no disponible`) y un artículo deja su tarea en `failed` (`llm_unavailable`) en vez de rellenar texto.
+- **Eros no publica.** Escribe los artículos y los devuelve; la API del portafolio es la que los publica. Ya no hay publicación en LinkedIn ni en X.
 
 
 ---
 
 ## 🌟 Módulos y Capacidades
 
-### 1. 📱 Content Writer & Omnichannel Engine (`eros.content`)
-- **Generación Omnicanal de Alta Densidad Técnica:** A partir de un tema de ingeniería o un proyecto de tu portafolio, redacta simultáneamente:
-  - **LinkedIn Post:** Hook magnético, contexto del problema, solución técnica con viñetas limpias, métricas reales, CTA de debate y hashtags.
-  - **Primer Comentario:** Enlace contextual a https://mateogs.tech o al repositorio respectivo.
-  - **Hilo de Twitter/X:** Hilo conciso de 3 a 5 tweets (< 275 caracteres cada uno).
-  - **Artículo Técnico para Dev.to:** Markdown completo con encabezados, tags y bloques de código.
-- **5 Pilares Temáticos Configurados:**
-  - `architecture`: Decisiones de diseño (SSR vs SPA, monorrepo, microservicios, edge caching).
-  - `production_lessons`: Bugs reales en producción, incidentes de CORS, políticas CSP (`eval`), hidratación.
-  - `performance_optimization`: Core Web Vitals, Lighthouse 99-100, bundle splitting, optimización de fuentes e imágenes.
-  - `ai_agent_ops`: Arquitecturas de agentes autónomos, LLMs con Gemini Free Tier, prompt engineering y tool calling.
-  - `fullstack_engineering`: TypeScript end-to-end, Vue 3 / Nuxt 3, Node / Express, PostgreSQL.
+### 1. ✍️ Artículos para el portafolio (`eros.content`)
+- **Un artículo largo por pedido, en español y en inglés.** Primero escribe el artículo en español (900 a 1500 palabras, en primera persona como Mateo, en rioplatense) con el perfil real del portafolio y, si se piden, un proyecto o una tendencia del Radar; después lo traduce al inglés de forma fiel, con la misma estructura.
+- **Sin tema, elige uno.** Anclado en un proyecto o en el stack real, y distinto de los títulos que el portafolio ya publicó (`avoid_titles`).
+- **Nunca inventa.** Ni métricas, ni porcentajes, ni clientes: solo cita los proyectos reales del perfil.
+- **Solo el Markdown que el portafolio muestra:** subtítulos `##` y `###` (el título va aparte), párrafos, listas, citas, bloques de código, código en línea, negrita, itálica y enlaces `http`/`https`. Sin tablas, imágenes, HTML crudo ni emojis. Eros valida todo eso al recibir la respuesta: si no cumple, la tarea falla con el motivo (un `#` inicial se saca solo).
 
-### 2. 🎠 Carousel Visual Studio (`CarouselRenderer`)
-- **Diapositivas 4:5 (1080 x 1350 px):** Relación de aspecto óptima para el algoritmo de LinkedIn.
-- **Estética Técnica Dark Noir:** Fondo obsidiana (`#07090e`), acentos en esmeralda neón (`#10b981`) y cian eléctrico (`#06b6d4`), tipografía Inter y bloques de código en Fira Code.
-- **Visor Interactivo Web:** Navegación por teclado (flechas ◀ / ▶) y pills interactivos.
-- **Impresión Directa a PDF de LinkedIn:** Incluye reglas CSS `@media print` (`@page { size: 1080px 1350px; margin: 0; }`) para exportar directamente a PDF listo para adjuntar como documento en LinkedIn.
-
-### 3. ⚡ Distribución y Orquestación con n8n (`ContentDispatcher`)
-- **Human-in-the-Loop:** Nada se publica sin aprobación explícita.
-- **Webhook de n8n:** Al aprobar un borrador (desde Telegram o la API), Eros despacha el payload a `N8N_WEBHOOK_URL` con el `channel` pedido (`all` = LinkedIn + X, `linkedin`, `twitter`) y solo el texto de esos canales. Dev.to no tiene publicación automática (se rechaza con 422). n8n publica y confirma cada canal con `POST /api/webhooks/n8n/callback` (`{post_id, status: "published", channel}`); la publicación queda `published` cuando todos los canales despachados están confirmados.
-- **Seguridad del webhook:** Eros manda `N8N_WEBHOOK_SECRET` en el header `X-N8N-Secret` (contenido y postulaciones). **Los webhooks de n8n tienen que validarlo**: en el nodo Webhook, *Authentication → Header Auth* con una credencial `X-N8N-Secret` = el mismo valor. El workflow de `n8n/` ya lo trae configurado (falta asignarle la credencial). Sin eso, cualquiera que conozca la URL puede publicar en tus redes.
-- **Claves en n8n, sin `$env`:** el workflow no lee variables de entorno (n8n 2.x bloquea `$env` en los nodos por defecto). Usa dos credenciales *Header Auth*: `Eros → n8n` (`X-N8N-Secret` = `N8N_WEBHOOK_SECRET`), para el Webhook y para las confirmaciones a Eros, y `n8n → Eros` (`Authorization` = `Bearer <EROS_API_KEY>`), para los crons que llaman a Eros.
-
-### 4. 🎯 Autonomous Job Hunter & CV Matcher (`eros.hunter`)
+### 2. 🎯 Autonomous Job Hunter & CV Matcher (`eros.hunter`)
 - **Multi-Fuente:** Get on Board, RemoteOK, Hacker News ("Who is hiring?").
 - **Scoring y Match:** Evaluación semántica contra tu perfil y proyectos reales (0–100%).
 - **CV Harvard ATS:** Generación de currículum a medida para la vacante con versión HTML imprimible.
 - **Pitches y Cover Letters:** Redacción instantánea de propuestas adaptadas.
 
-### 5. 🤖 Centro de Control por Telegram (`TelegramBot`)
-- `/post <tema>` — Genera un post omnicanal instantáneo y te envía la vista previa con botones para aprobar o ver el carousel.
-- `/pendientes` — Lista borradores esperando tu visto bueno.
+### 3. ⚡ n8n: escaneo diario y postulaciones
+- **Escaneo diario:** el workflow de `n8n/` (`Eros · Búsqueda diaria de vacantes`) corre a las 08:00 y 18:00 y llama a `POST /api/scan?evaluate=true` con la credencial *Header Auth* `n8n → Eros` (`Authorization` = `Bearer <EROS_API_KEY>`). No lee `$env` (n8n 2.x lo bloquea en los nodos por defecto): falta asignarle la credencial al importarlo.
+- **Postulaciones por correo (opcional):** si está `N8N_APPLICATION_WEBHOOK_URL`, Eros manda ahí cada postulación con `N8N_WEBHOOK_SECRET` en el header `X-N8N-Secret`. Ese webhook no está en el workflow de `n8n/`: es el que tengas armado para mandar los correos (por ejemplo con Gmail), y **tiene que validarlo** con *Authentication → Header Auth* (credencial `Eros → n8n`, `X-N8N-Secret` = el mismo valor). Sin esa URL, Eros usa SMTP; sin ninguno de los dos, no envía.
+
+### 4. 🤖 Centro de Control por Telegram (`TelegramBot`)
 - `/buscar` — Dispara un escaneo de vacantes en todas las fuentes.
 - `/ofertas` — Muestra las mejores vacantes detectadas.
-- `/status` — Resumen en vivo de vacantes y publicaciones.
+- `/status` — Resumen en vivo de vacantes y del webhook de postulaciones.
+- `/perfil` — Muestra el perfil sincronizado del portafolio.
 - `/sync` — Sincroniza en tiempo real tu perfil desde `https://api.mateogs.tech/api`.
+
+---
+
+## 📝 Artículos: contrato con el portafolio
+
+`POST /api/articles/generate` (misma autenticación que el resto: `Authorization: Bearer <EROS_API_KEY>`, `X-Eros-Key` o la sesión). Todo el cuerpo es opcional:
+
+```json
+{
+  "topic": "string o null (máx. 300)",
+  "project_slug": "string o null",
+  "trend_id": "string o null",
+  "angle": "string o null (máx. 1000)",
+  "avoid_titles": ["títulos ya publicados (máx. 300, cada uno de hasta 200)"]
+}
+```
+
+Responde **202** igual que `/api/scan`: `{ok, task_id, kind: "article", status, started_at, already_running, status_url}`. Se escribe un artículo a la vez: un segundo pedido mientras hay uno en curso devuelve esa misma tarea con `already_running: true`. Con `trend_id`, la tendencia del Radar queda `GENERATED` cuando el artículo termina.
+
+`GET /api/tasks/{task_id}` con `status: "done"` trae en `result`:
+
+```json
+{
+  "topic": "string",
+  "project_slug": "string o null",
+  "trend_id": "string o null",
+  "tags": ["nuxt", "postgres"],
+  "es": {"title": "máx. 160", "summary": "máx. 400", "markdown": "string"},
+  "en": {"title": "string", "summary": "string", "markdown": "string"},
+  "model": "modelo de Gemini que lo escribió"
+}
+```
+
+Con `status: "failed"`, `error` explica el motivo en castellano y `error_code` lo resume:
+
+| `error_code` | Qué pasó |
+|---|---|
+| `llm_unavailable` | `Gemini no está disponible: …` (sin clave, cuota agotada o todos los modelos fallaron). |
+| `llm_output_invalid` | La respuesta no sirve: `El artículo vino incompleto: …`, `El artículo no respeta el formato del portafolio: …` o lo mismo para la traducción al inglés. |
+| `trend_not_found` | No existe esa tendencia en el Radar. |
+| `project_not_found` | El proyecto no está en el perfil, ni después de sincronizarlo. |
+
+Las tareas viven en memoria: si Eros se reinicia, `GET /api/tasks/{id}` responde 404.
 
 ---
 
@@ -60,17 +87,11 @@ Sistema multiagente autónomo personal para **búsqueda de empleo tech** (remoto
 
 | Método | Endpoint | Descripción |
 |---|---|---|
-| `POST` | `/api/content/generate` | Genera una publicación omnicanal (LinkedIn + X + Dev.to + 5 slides). |
-| `GET` | `/api/content/posts` | Lista publicaciones (filtro por `status: draft, approved, published`). |
-| `GET` | `/api/content/posts/{id}` | Detalle completo de una publicación. |
-| `PATCH` | `/api/content/posts/{id}/status` | Actualiza estado (`draft`, `approved`, `published`, `rejected`). |
-| `POST` | `/api/content/posts/{id}/publish` | Body `{channel}`. Despacha a n8n → `status: "dispatched"` (o `approved_local` sin n8n). 409 si ya está publicada, rechazada o ese canal ya se despachó. |
-| `GET` | `/api/content/carousel/{id}/html` | Visor HTML interactivo e imprimible del carousel. |
-| `POST` | `/api/webhooks/n8n/callback` | Callback para que n8n confirme la publicación externa. |
+| `POST` | `/api/articles/generate` | **202** con `task_id`: escribe un artículo para el portafolio (ver arriba). |
 | `GET` | `/api/jobs` | Lista de ofertas (incluye `contact_email_source`, `scored_by`, `send_state`). |
 | `POST` | `/api/scan` | **202** con `task_id`: escanea en segundo plano. Un segundo pedido mientras corre devuelve la misma tarea (`already_running: true`). |
 | `POST` | `/api/evaluate` | **202** con `task_id`: evalúa pendientes en segundo plano. |
-| `GET` | `/api/tasks/{task_id}` | Estado de la tarea: `running`, `done` (con `result`) o `failed` (con `error`). |
+| `GET` | `/api/tasks/{task_id}` | Estado de la tarea: `running`, `done` (con `result`) o `failed` (con `error` y `error_code`). |
 | `POST` | `/api/purge` | Marca como descartadas (sin borrar) las incompatibles. Nunca toca las postuladas. |
 | `POST` | `/api/jobs/{id}/find-email` | Busca un correo real; devuelve `contact_email`, `contact_email_source`, `source`, `found`. |
 | `PATCH` | `/api/jobs/{id}/contact-email` | Correo escrito a mano (`contact_email_source: "manual"`). |
@@ -78,6 +99,7 @@ Sistema multiagente autónomo personal para **búsqueda de empleo tech** (remoto
 | `POST` | `/api/jobs/{id}/apply-email` | Envía la postulación. Errores con `detail` + `error_code` (ver abajo). |
 | `POST` | `/api/cv/{job_id}` | Genera CV Harvard ATS adaptado (503 sin IA). |
 | `GET` | `/api/jobs/{id}/cv/html` · `/pdf` | Solo el CV ya guardado. Requiere la clave o `?token=` firmado de esa vacante. Nunca genera con IA. |
+| `POST` | `/api/radar/scan` · `GET` `/api/radar/trends` | Radar de tendencias (Hacker News, Dev.to, GitHub): punto de partida de los artículos con `trend_id`. |
 | `GET` | `/health` | 200 si la base responde, 503 si no. |
 
 ### Errores de `apply-email`
@@ -96,8 +118,8 @@ Sistema multiagente autónomo personal para **búsqueda de empleo tech** (remoto
 ## 💻 Comandos CLI
 
 ```powershell
-# 1. Generar contenido omnicanal directamente por CLI:
-python -m eros.main --post "Por qué migramos de React a Nuxt 3 y SSR"
+# 1. Escribir un artículo por CLI (muestra los títulos; no lo guarda ni lo publica):
+python -m eros.main --articulo "Por qué el portafolio se renderiza en el servidor"
 
 # 2. Iniciar el servidor API (puerto 8000):
 python -m eros.main --server --port 8000
@@ -127,10 +149,9 @@ Corre toda la suite sin red (cualquier conexión que no sea a localhost falla), 
 1. Repositorio en GitHub: `MateoGs013/eros-agent`.
 2. En Coolify:
    - Crear aplicación tipo **Dockerfile**.
-   - Configurar variables de entorno (`GEMINI_API_KEY`, `EROS_API_KEY`, `N8N_WEBHOOK_URL`, `N8N_APPLICATION_WEBHOOK_URL`, `N8N_WEBHOOK_SECRET`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALLOWED_USER_ID`, `PORTFOLIO_API_URL`). Ver `.env.example`.
+   - Configurar variables de entorno (`GEMINI_API_KEY`, `EROS_API_KEY`, `N8N_APPLICATION_WEBHOOK_URL`, `N8N_WEBHOOK_SECRET`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALLOWED_USER_ID`, `PORTFOLIO_API_URL`). Ver `.env.example`. `N8N_WEBHOOK_URL` ya no se usa: si quedó cargada, Eros la ignora y se puede borrar.
    - Puerto de escucha: `8000`. El contenedor trae `HEALTHCHECK` contra `/health`.
    - Montar un volumen persistente en `/app/data` (ahí vive la base SQLite).
 3. Interconexión interna:
-   - Portafolio Express (`HUNTER_API_URL=http://eros-agent:8000`).
-   - n8n (`flow.mateogs.tech`) recibe webhooks desde `eros-agent` y confirma mediante callback.
-
+   - Portafolio Express (`HUNTER_API_URL=http://eros-agent:8000`): pide los artículos y los publica.
+   - n8n (`flow.mateogs.tech`) llama a Eros dos veces por día para escanear y, si está configurado, recibe las postulaciones por correo.
